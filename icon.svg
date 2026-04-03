@@ -1,5 +1,25 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="20" ry="20" fill="#007acc"/>
-  <text x="64" y="70" font-family="Arial, sans-serif" font-size="48" font-weight="bold" text-anchor="middle" fill="white">&lt;/&gt;</text>
-  <text x="64" y="100" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="rgba(255,255,255,0.8)">CodeLine</text>
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="gradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5" />
+      <stop offset="100%" stop-color="#7C3AED" />
+    </linearGradient>
+  </defs>
+  
+  <!-- 圆形背景 -->
+  <circle cx="64" cy="64" r="60" fill="url(#gradient)" />
+  
+  <!-- 代码括号符号 -->
+  <g fill="white" stroke="white" stroke-width="2">
+    <!-- 左括号 -->
+    <path d="M48,50 C42,58 42,70 48,78" fill="none" stroke-width="6" stroke-linecap="round" />
+    <!-- 右括号 -->
+    <path d="M80,50 C86,58 86,70 80,78" fill="none" stroke-width="6" stroke-linecap="round" />
+    <!-- 中间的线（代表Line） -->
+    <line x1="60" y1="64" x2="68" y2="64" stroke-width="4" stroke-linecap="round" />
+    <line x1="64" y1="60" x2="64" y2="68" stroke-width="4" stroke-linecap="round" />
+  </g>
+  
+  <!-- 外圈装饰 -->
+  <circle cx="64" cy="64" r="58" fill="none" stroke="white" stroke-width="2" stroke-opacity="0.3" />
 </svg>

@@ -1,0 +1,32 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="grad1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4F46E5" />
+      <stop offset="50%" stop-color="#7C3AED" />
+      <stop offset="100%" stop-color="#EC4899" />
+    </linearGradient>
+    <linearGradient id="grad2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#10B981" />
+      <stop offset="100%" stop-color="#3B82F6" />
+    </linearGradient>
+  </defs>
+  
+  <!-- 主背景圆形 -->
+  <circle cx="64" cy="64" r="58" fill="url(#grad1)" />
+  
+  <!-- 代码括号符号 -->
+  <g fill="white" stroke="white">
+    <!-- 左括号 -->
+    <path d="M44,48 C38,56 38,72 44,80" fill="none" stroke-width="8" stroke-linecap="round" opacity="0.9" />
+    <!-- 右括号 -->
+    <path d="M84,48 C90,56 90,72 84,80" fill="none" stroke-width="8" stroke-linecap="round" opacity="0.9" />
+    <!-- 加号（代表连接/扩展） -->
+    <rect x="60" y="60" width="8" height="8" rx="2" fill="url(#grad2)" />
+    <rect x="62" y="56" width="4" height="16" rx="1" fill="url(#grad2)" />
+    <rect x="56" y="62" width="16" height="4" rx="1" fill="url(#grad2)" />
+  </g>
+  
+  <!-- 装饰性圆环 -->
+  <circle cx="64" cy="64" r="62" fill="none" stroke="white" stroke-width="2" stroke-opacity="0.2" />
+  <circle cx="64" cy="64" r="55" fill="none" stroke="white" stroke-width="1" stroke-opacity="0.3" />
+</svg>

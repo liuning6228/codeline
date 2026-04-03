@@ -227,6 +227,112 @@ const SettingsView: React.FC<SettingsViewProps> = ({ config, onNavigate, onClose
           </div>
         );
         
+      case 'plugins':
+        return (
+          <div>
+            <h3 className="text-lg font-medium mb-4">Plugin Management</h3>
+            <div className="space-y-4">
+              <div className="bg-secondary/50 p-4 rounded-lg">
+                <div className="flex items-center justify-between mb-3">
+                  <h4 className="font-medium">Plugin System Status</h4>
+                  <span className="px-2 py-1 bg-green-500/20 text-green-600 text-xs rounded">Active</span>
+                </div>
+                <p className="text-sm text-gray-400 mb-4">
+                  Manage CodeLine plugins to extend functionality with additional tools and features.
+                </p>
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div className="flex items-center space-x-2">
+                    <div className="h-2 w-2 rounded-full bg-blue-500"></div>
+                    <span>Loaded plugins: 3</span>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <div className="h-2 w-2 rounded-full bg-green-500"></div>
+                    <span>Active plugins: 2</span>
+                  </div>
+                </div>
+              </div>
+              
+              <div>
+                <h4 className="font-medium mb-3">Installed Plugins</h4>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-3 bg-background border border-border rounded-lg">
+                    <div className="flex items-center space-x-3">
+                      <div className="h-8 w-8 rounded-lg bg-blue-500/20 flex items-center justify-center">
+                        <span className="text-blue-500">📁</span>
+                      </div>
+                      <div>
+                        <div className="font-medium">File Manager</div>
+                        <div className="text-xs text-gray-400">v1.2.0</div>
+                      </div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" className="sr-only peer" defaultChecked />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                  </div>
+                  
+                  <div className="flex items-center justify-between p-3 bg-background border border-border rounded-lg">
+                    <div className="flex items-center space-x-3">
+                      <div className="h-8 w-8 rounded-lg bg-green-500/20 flex items-center justify-center">
+                        <span className="text-green-500">🔧</span>
+                      </div>
+                      <div>
+                        <div className="font-medium">Tool Registry</div>
+                        <div className="text-xs text-gray-400">v1.0.1</div>
+                      </div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" className="sr-only peer" defaultChecked />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                  </div>
+                  
+                  <div className="flex items-center justify-between p-3 bg-background border border-border rounded-lg">
+                    <div className="flex items-center space-x-3">
+                      <div className="h-8 w-8 rounded-lg bg-purple-500/20 flex items-center justify-center">
+                        <span className="text-purple-500">🌐</span>
+                      </div>
+                      <div>
+                        <div className="font-medium">MCP Bridge</div>
+                        <div className="text-xs text-gray-400">v0.9.3</div>
+                      </div>
+                    </div>
+                    <label className="relative inline-flex items-center cursor-pointer">
+                      <input type="checkbox" className="sr-only peer" />
+                      <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              
+              <div>
+                <h4 className="font-medium mb-3">Plugin Actions</h4>
+                <div className="flex space-x-3">
+                  <button className="px-4 py-2 bg-secondary hover:bg-secondary/80 rounded text-sm">
+                    Refresh Plugins
+                  </button>
+                  <button className="px-4 py-2 bg-secondary hover:bg-secondary/80 rounded text-sm">
+                    Install Plugin...
+                  </button>
+                  <button className="px-4 py-2 bg-secondary hover:bg-secondary/80 rounded text-sm">
+                    Open Plugin Directory
+                  </button>
+                </div>
+              </div>
+              
+              <div className="pt-4 border-t border-border">
+                <div className="text-sm text-gray-400">
+                  <p>Plugin directories:</p>
+                  <ul className="list-disc pl-5 mt-2 space-y-1">
+                    <li><code className="text-xs">~/.vscode/extensions/codeline-dev.codeline/plugins</code></li>
+                    <li><code className="text-xs">/workspace/.codeline/plugins</code></li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+        
       default:
         return (
           <div className="text-center py-8 text-gray-400">
@@ -283,32 +389,44 @@ const SettingsView: React.FC<SettingsViewProps> = ({ config, onNavigate, onClose
             <>
               <button
                 onClick={handleImport}
-                className="px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded text-sm"
+                className="flex items-center space-x-2 px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded text-sm"
               >
-                Import
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM6.293 6.707a1 1 0 010-1.414l3-3a1 1 0 011.414 0l3 3a1 1 0 01-1.414 1.414L11 5.414V13a1 1 0 11-2 0V5.414L7.707 6.707a1 1 0 01-1.414 0z" clipRule="evenodd" />
+                </svg>
+                <span>Import</span>
               </button>
               <button
                 onClick={handleExport}
-                className="px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded text-sm"
+                className="flex items-center space-x-2 px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded text-sm"
               >
-                Export
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zM13.293 5.293a1 1 0 011.414 0l3 3a1 1 0 010 1.414l-3 3a1 1 0 01-1.414-1.414L14.586 11H3a1 1 0 110-2h11.586l-1.293-1.293a1 1 0 010-1.414z" clipRule="evenodd" />
+                </svg>
+                <span>Export</span>
               </button>
             </>
           )}
           {config.showResetButton && (
             <button
               onClick={handleReset}
-              className="px-3 py-1.5 bg-red-500/20 text-red-600 hover:bg-red-500/30 rounded text-sm"
+              className="flex items-center space-x-2 px-3 py-1.5 bg-red-500/20 text-red-600 hover:bg-red-500/30 rounded text-sm"
             >
-              Reset
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 102 0V8a1 1 0 00-1-1z" clipRule="evenodd" />
+              </svg>
+              <span>Reset</span>
             </button>
           )}
           {onClose && (
             <button
               onClick={onClose}
-              className="px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded text-sm"
+              className="flex items-center space-x-2 px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded text-sm"
             >
-              Close
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+              </svg>
+              <span>Close</span>
             </button>
           )}
         </div>
@@ -325,6 +443,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ config, onNavigate, onClose
                 tools: 'Tools',
                 ui: 'UI & Theme',
                 advanced: 'Advanced',
+                plugins: 'Plugins',
               };
               
               const moduleIcons: Record<string, string> = {
@@ -333,6 +452,7 @@ const SettingsView: React.FC<SettingsViewProps> = ({ config, onNavigate, onClose
                 tools: '🔧',
                 ui: '🎨',
                 advanced: '⚙️',
+                plugins: '🧩',
               };
               
               return (
