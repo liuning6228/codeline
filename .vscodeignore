@@ -1,0 +1,50 @@
+# .vscodeignore - Files to exclude from extension packaging
+
+# Development files
+.git/
+.gitignore
+.github/
+.vscode/
+node_modules/
+*.ts
+!*.d.ts
+src/
+tsconfig.json
+.mocharc*
+*.test.*
+test/
+coverage/
+nyc.config.js
+.eslintrc*
+.prettierrc*
+.prettierignore
+*.log
+
+# Build artifacts
+out/**/*.map
+*.vsix
+.DS_Store
+Thumbs.db
+
+# Documentation
+README.md
+LICENSE
+CHANGELOG.md
+TODO.md
+
+# Test files
+test/
+*.test.*
+**/*.test.*
+**/test/
+**/__tests__/
+**/__mocks__/
+
+# Source maps
+**/*.map
+
+# Development configuration files
+.env*
+.env.*
+config.local.*
+*.local.*
