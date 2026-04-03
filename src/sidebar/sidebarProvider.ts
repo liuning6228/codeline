@@ -115,7 +115,7 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
     }
 
     private async _handleWebviewMessage(message: any) {
-        console.log('Sidebar received message:', message);
+        console.debug('Sidebar received message:', message);
         
         switch (message.command) {
             case 'switchView':
@@ -177,6 +177,9 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
         this._isProcessing = true;
         
         try {
+            // 添加详细日志
+            console.debug(`[CodeLine] Processing user message: "${text}"`);
+            
             // Add user message
             const userMessage: ChatMessage = {
                 id: Date.now().toString(),
@@ -190,26 +193,53 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
             // Send typing indicator
             this._sendMessageToWebview('typing', { isTyping: true });
 
-            // Process through task engine
-            const response = await this._extension.executeTask(text);
+            // 判断是否为简单消息（问候、简短问题等）
+            const isSimpleMessage = this._isSimpleMessage(text);
+            
+            let responseContent = '';
+            
+            if (isSimpleMessage) {
+                // 对于简单消息，直接调用模型生成对话响应
+                console.log(`[CodeLine] Simple message detected, using direct conversation mode`);
+                try {
+                    const modelResponse = await this._extension.getModelAdapter().generate(text);
+                    responseContent = modelResponse.content || 'No response content';
+                    console.log(`[CodeLine] Direct conversation response received`);
+                } catch (error: any) {
+                    console.error(`[CodeLine] Direct conversation failed:`, error);
+                    // 如果直接对话失败，回退到任务引擎
+                    console.log(`[CodeLine] Falling back to task engine`);
+                    const response = await this._extension.executeTask(text);
+                    responseContent = response?.output || 'No response received';
+                }
+            } else {
+                // 对于复杂消息，使用任务引擎
+                console.log(`[CodeLine] Calling executeTask with: "${text}"`);
+                const response = await this._extension.executeTask(text);
+                console.log(`[CodeLine] Task response received:`, response);
+                responseContent = response?.output || 'No response received';
+            }
             
             // Add assistant response
             const assistantMessage: ChatMessage = {
                 id: (Date.now() + 1).toString(),
                 role: 'assistant',
-                content: response?.output || 'No response received',
+                content: responseContent,
                 timestamp: new Date()
             };
             this._messages.push(assistantMessage);
             this._updateWebview();
 
         } catch (error: any) {
-            console.error('Error processing message:', error);
+            // 输出完整错误堆栈
+            console.error('[CodeLine] Full error stack:', error);
+            console.error('[CodeLine] Error message:', error.message);
+            console.error('[CodeLine] Error stack trace:', error.stack);
             
             const errorMessage: ChatMessage = {
                 id: (Date.now() + 2).toString(),
                 role: 'assistant',
-                content: `Error: ${error.message}`,
+                content: `Error: ${error.message}\nStack: ${error.stack?.substring(0, 200)}...`,
                 timestamp: new Date()
             };
             this._messages.push(errorMessage);
@@ -221,6 +251,74 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
             this._isProcessing = false;
             this._sendMessageToWebview('typing', { isTyping: false });
         }
+    }
+
+    /**
+     * 判断消息是否为简单消息（问候、简短问题等）
+     * 简单消息应该直接进行对话，而不是执行任务
+     */
+    private _isSimpleMessage(text: string): boolean {
+        const trimmed = text.trim().toLowerCase();
+        
+        // 首先检查是否包含明显的任务关键词
+        const taskKeywords = [
+            'create', 'build', 'make', 'write', 'generate', 'implement',
+            'fix', 'debug', 'solve', 'analyze', 'check', 'review',
+            'add', 'remove', 'delete', 'update', 'modify', 'change',
+            'refactor', 'optimize', 'improve', 'enhance',
+            'task:', 'todo:', 'action:', 'command:', '@'
+        ];
+        
+        for (const keyword of taskKeywords) {
+            if (trimmed.includes(keyword)) {
+                console.debug(`[CodeLine] Task keyword detected: "${keyword}", treating as task message`);
+                return false;
+            }
+        }
+        
+        // 检查是否是常见的问候语
+        const greetings = [
+            'hello', 'hi', 'hey', 'hola', 'bonjour', 'ciao',
+            '你好', '嗨', 'こんにちは', '안녕하세요',
+            'how are you', 'how are you doing', "what's up",
+            'good morning', 'good afternoon', 'good evening',
+            'morning', 'afternoon', 'evening'
+        ];
+        
+        for (const greeting of greetings) {
+            if (trimmed === greeting || trimmed.startsWith(greeting + ' ')) {
+                console.debug(`[CodeLine] Greeting detected: "${greeting}", treating as simple message`);
+                return true;
+            }
+        }
+        
+        // 检查是否是简短的介绍或自我介绍
+        if (trimmed.includes('my name is') || trimmed.includes('i am ') || 
+            trimmed.includes('i\'m ') || trimmed.includes('call me')) {
+            console.debug(`[CodeLine] Self-introduction detected, treating as simple message`);
+            return true;
+        }
+        
+        // 检查是否是简单的问题（以who, what, when, where, why, how开头）
+        if (trimmed.startsWith('who ') || trimmed.startsWith('what ') || 
+            trimmed.startsWith('when ') || trimmed.startsWith('where ') ||
+            trimmed.startsWith('why ') || trimmed.startsWith('how ') ||
+            trimmed.startsWith('can ') || trimmed.startsWith('could ') ||
+            trimmed.startsWith('would ') || trimmed.startsWith('should ')) {
+            const isShort = trimmed.length < 100;
+            console.debug(`[CodeLine] Question detected, length: ${trimmed.length}, treating as ${isShort ? 'simple' : 'task'} message`);
+            return isShort; // 简短的问题视为简单消息
+        }
+        
+        // 检查长度 - 非常短的消息可能是简单的问候（但已经排除了任务关键词）
+        if (trimmed.length < 20 && !trimmed.includes('?')) {
+            console.debug(`[CodeLine] Short message detected (${trimmed.length} chars), treating as simple message`);
+            return true;
+        }
+        
+        // 默认情况下，视为任务消息
+        console.debug(`[CodeLine] No special pattern detected, treating as task message`);
+        return false;
     }
 
     private async _handleTaskExecution(task: string) {
@@ -546,14 +644,23 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
                     }
                     
                     .nav-tab {
-                        padding: 6px 12px;
+                        padding: 8px;
                         border: none;
                         background: transparent;
                         color: var(--text-secondary);
-                        font-size: 12px;
                         cursor: pointer;
-                        border-radius: 2px;
+                        border-radius: 4px;
                         transition: all 0.2s;
+                        display: flex;
+                        align-items: center;
+                        justify-content: center;
+                        width: 36px;
+                        height: 36px;
+                    }
+                    
+                    .nav-icon {
+                        font-size: 18px;
+                        line-height: 1;
                     }
                     
                     .nav-tab:hover {
@@ -913,17 +1020,17 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
                 <div class="header">
                     <h2>CodeLine</h2>
                     <div class="nav-tabs">
-                        <button class="nav-tab ${this._currentView === 'chat' ? 'active' : ''}" onclick="switchView('chat')">
-                            Chat
+                        <button class="nav-tab ${this._currentView === 'chat' ? 'active' : ''}" onclick="switchView('chat')" title="Chat">
+                            <span class="nav-icon">💬</span>
                         </button>
-                        <button class="nav-tab ${this._currentView === 'tasks' ? 'active' : ''}" onclick="switchView('tasks')">
-                            Tasks
+                        <button class="nav-tab ${this._currentView === 'tasks' ? 'active' : ''}" onclick="switchView('tasks')" title="Tasks">
+                            <span class="nav-icon">📋</span>
                         </button>
-                        <button class="nav-tab ${this._currentView === 'settings' ? 'active' : ''}" onclick="switchView('settings')">
-                            Settings
+                        <button class="nav-tab ${this._currentView === 'settings' ? 'active' : ''}" onclick="switchView('settings')" title="Settings">
+                            <span class="nav-icon">⚙️</span>
                         </button>
-                        <button class="nav-tab ${this._currentView === 'history' ? 'active' : ''}" onclick="switchView('history')">
-                            History
+                        <button class="nav-tab ${this._currentView === 'history' ? 'active' : ''}" onclick="switchView('history')" title="History">
+                            <span class="nav-icon">📜</span>
                         </button>
                     </div>
                 </div>

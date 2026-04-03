@@ -239,4 +239,72 @@ export class ModelAdapter {
     const provider = this.providerManager.getCurrentProvider();
     return provider.validateConfig(this.config);
   }
+
+  /**
+   * 清理JSON响应中的Markdown代码块
+   * @param jsonString 可能包含Markdown代码块的JSON字符串
+   * @returns 清理后的纯JSON字符串
+   */
+  public static cleanJsonResponse(jsonString: string): string {
+    if (!jsonString || typeof jsonString !== 'string') {
+      return jsonString;
+    }
+    
+    // 移除开头的 ```json 或 ``` 标记
+    let cleaned = jsonString.trim();
+    
+    // 移除开头的 ```json、```javascript、```typescript 等
+    if (cleaned.startsWith('```')) {
+      const firstNewline = cleaned.indexOf('\n');
+      if (firstNewline !== -1) {
+        cleaned = cleaned.substring(firstNewline + 1);
+      } else {
+        // 如果没有换行符，直接移除 ```
+        cleaned = cleaned.substring(3);
+      }
+    }
+    
+    // 移除结尾的 ```
+    const lastBackticks = cleaned.lastIndexOf('```');
+    if (lastBackticks !== -1) {
+      cleaned = cleaned.substring(0, lastBackticks);
+    }
+    
+    // 清理后再次trim
+    cleaned = cleaned.trim();
+    
+    // 如果字符串以 { 或 [ 开头，确保它是有效的JSON
+    return cleaned;
+  }
+  
+  /**
+   * 安全解析JSON，自动清理Markdown代码块
+   * @param jsonString 可能包含Markdown代码块的JSON字符串
+   * @returns 解析后的JSON对象
+   */
+  public static safeParseJson(jsonString: string): any {
+    try {
+      const cleaned = ModelAdapter.cleanJsonResponse(jsonString);
+      return JSON.parse(cleaned);
+    } catch (error) {
+      // 如果清理后仍然失败，尝试更激进的清理
+      console.warn('Failed to parse JSON after cleaning:', error);
+      
+      // 尝试提取第一个 { 和最后一个 } 之间的内容
+      const firstBrace = jsonString.indexOf('{');
+      const lastBrace = jsonString.lastIndexOf('}');
+      
+      if (firstBrace !== -1 && lastBrace !== -1 && lastBrace > firstBrace) {
+        const extracted = jsonString.substring(firstBrace, lastBrace + 1);
+        try {
+          return JSON.parse(extracted);
+        } catch (innerError) {
+          console.error('Failed to parse extracted JSON:', innerError);
+          throw new Error(`Invalid JSON response: ${jsonString.substring(0, 100)}...`);
+        }
+      }
+      
+      throw error;
+    }
+  }
 }

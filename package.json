@@ -2,7 +2,7 @@
   "name": "codeline",
   "displayName": "CodeLine",
   "description": "AI coding assistant combining Cline's autonomous capabilities with Qoder's prompt engineering",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "engines": {
     "vscode": "^1.110.0"
   },

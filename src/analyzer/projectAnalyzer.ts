@@ -50,18 +50,66 @@ export class ProjectAnalyzer {
     };
   }
 
+  /**
+   * 安全解析JSON文件，自动清理Markdown代码块
+   * @param filePath JSON文件路径
+   * @returns 解析后的JSON对象，如果解析失败则返回null
+   */
+  private safeParseJsonFile(filePath: string): any | null {
+    try {
+      const content = fs.readFileSync(filePath, 'utf8');
+      return this.safeParseJsonString(content);
+    } catch (error) {
+      console.error(`Failed to read or parse JSON file ${filePath}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * 安全解析JSON字符串，自动清理Markdown代码块
+   * @param jsonString JSON字符串
+   * @returns 解析后的JSON对象
+   * @throws 如果清理后仍然不是有效的JSON
+   */
+  private safeParseJsonString(jsonString: string): any {
+    // 清理可能存在的Markdown代码块
+    let cleanedContent = jsonString.trim();
+    if (cleanedContent.startsWith('```')) {
+      const firstNewline = cleanedContent.indexOf('\n');
+      if (firstNewline !== -1) {
+        cleanedContent = cleanedContent.substring(firstNewline + 1);
+      } else {
+        cleanedContent = cleanedContent.substring(3);
+      }
+    }
+    const lastBackticks = cleanedContent.lastIndexOf('```');
+    if (lastBackticks !== -1) {
+      cleanedContent = cleanedContent.substring(0, lastBackticks);
+    }
+    cleanedContent = cleanedContent.trim();
+    
+    return JSON.parse(cleanedContent);
+  }
+
   private async detectProjectType(rootPath: string): Promise<string> {
     const files = fs.readdirSync(rootPath);
     
     if (files.includes('package.json')) {
-      const packageJson = JSON.parse(fs.readFileSync(path.join(rootPath, 'package.json'), 'utf8'));
-      if (packageJson.dependencies?.['react'] || packageJson.devDependencies?.['react']) {
-        return 'react';
+      try {
+        const packageJson = this.safeParseJsonFile(path.join(rootPath, 'package.json'));
+        if (packageJson) {
+          if (packageJson.dependencies?.['react'] || packageJson.devDependencies?.['react']) {
+            return 'react';
+          }
+          if (packageJson.dependencies?.['vue'] || packageJson.devDependencies?.['vue']) {
+            return 'vue';
+          }
+          return 'node';
+        }
+      } catch (error) {
+        console.error('Failed to parse package.json:', error);
+        // 如果解析失败，尝试检测其他项目类型
       }
-      if (packageJson.dependencies?.['vue'] || packageJson.devDependencies?.['vue']) {
-        return 'vue';
-      }
-      return 'node';
     }
     
     if (files.includes('pom.xml') || files.includes('build.gradle')) {
@@ -114,9 +162,13 @@ export class ProjectAnalyzer {
     if (projectType === 'node') {
       const packageJsonPath = path.join(rootPath, 'package.json');
       if (fs.existsSync(packageJsonPath)) {
-        const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-        if (packageJson.dependencies?.['express']) {
-          return 'express';
+        try {
+          const packageJson = this.safeParseJsonFile(packageJsonPath);
+          if (packageJson && packageJson.dependencies?.['express']) {
+            return 'express';
+          }
+        } catch (error) {
+          console.error('Failed to parse package.json in detectFramework:', error);
         }
       }
     }
@@ -160,12 +212,14 @@ export class ProjectAnalyzer {
       const packageJsonPath = path.join(rootPath, 'package.json');
       if (fs.existsSync(packageJsonPath)) {
         try {
-          const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
-          if (packageJson.dependencies) {
-            dependencies.push(...Object.keys(packageJson.dependencies));
-          }
-          if (packageJson.devDependencies) {
-            dependencies.push(...Object.keys(packageJson.devDependencies));
+          const packageJson = this.safeParseJsonFile(packageJsonPath);
+          if (packageJson) {
+            if (packageJson.dependencies) {
+              dependencies.push(...Object.keys(packageJson.dependencies));
+            }
+            if (packageJson.devDependencies) {
+              dependencies.push(...Object.keys(packageJson.devDependencies));
+            }
           }
         } catch (error) {
           console.error('Error parsing package.json:', error);

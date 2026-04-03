@@ -825,6 +825,124 @@ ${prompt}
     return steps;
   }
   
+  /**
+   * 清理代码内容，移除Markdown代码块标记和额外格式
+   * AI响应经常包含 ```c、```python 等标记，这些在源代码文件中是无效的
+   */
+  private cleanCodeContent(codeContent: string): string {
+    if (!codeContent || typeof codeContent !== 'string') {
+      return codeContent;
+    }
+    
+    const originalLength = codeContent.length;
+    let cleaned = codeContent.trim();
+    
+    // 移除开头的 ```c、```python、```javascript 等语言标记
+    // 支持各种编程语言的代码块标记
+    const codeBlockStarters = [
+      '```c', '```cpp', '```java', '```python', '```py', 
+      '```javascript', '```js', '```typescript', '```ts',
+      '```html', '```css', '```json', '```xml', '```yaml', '```yml',
+      '```bash', '```sh', '```shell', '```sql', '```go', '```rust',
+      '```ruby', '```php', '```swift', '```kotlin', '```scala',
+      '```csharp', '```cs', '```fsharp', '```fs', '```vb', '```r',
+      '```perl', '```pl', '```lua', '```dart', '```elixir', '```clojure',
+      '```haskell', '```hs', '```ocaml', '```julia', '```matlab'
+    ];
+    
+    for (const starter of codeBlockStarters) {
+      if (cleaned.startsWith(starter)) {
+        const firstNewline = cleaned.indexOf('\n');
+        if (firstNewline !== -1) {
+          cleaned = cleaned.substring(firstNewline + 1);
+        } else {
+          // 如果没有换行符，直接移除标记
+          cleaned = cleaned.substring(starter.length);
+        }
+        break; // 找到匹配的标记后退出
+      }
+    }
+    
+    // 如果开头是普通的 ```（无语言标记）
+    if (cleaned.startsWith('```')) {
+      const firstNewline = cleaned.indexOf('\n');
+      if (firstNewline !== -1) {
+        cleaned = cleaned.substring(firstNewline + 1);
+      } else {
+        cleaned = cleaned.substring(3);
+      }
+    }
+    
+    // 移除结尾的 ```
+    // 只有当 ``` 是字符串的最后三个字符（忽略空白）时才移除
+    const trimmedForCheck = cleaned.trim();
+    if (trimmedForCheck.endsWith('```')) {
+      // 找到最后一个 ``` 的位置
+      const lastBacktickIndex = cleaned.lastIndexOf('```');
+      if (lastBacktickIndex !== -1) {
+        // 检查 ``` 之后是否只有空白
+        const afterBackticks = cleaned.substring(lastBacktickIndex + 3);
+        if (afterBackticks.trim() === '') {
+          // 移除 ``` 及其后面的空白
+          cleaned = cleaned.substring(0, lastBacktickIndex).trim();
+        }
+      }
+    }
+    
+    // 移除开头的 "代码内容:" 或 "代码:" 标记（如果parseAIResponse没有完全移除）
+    // 这些标记可能单独在一行，也可能在行的开头
+    const codeMarkers = ['代码内容:', '代码:', 'Content:', 'Code:'];
+    const lines = cleaned.split('\n');
+    
+    // 检查第一行是否包含代码标记
+    if (lines.length > 0) {
+      const firstLine = lines[0].trim();
+      let markerFound = false;
+      
+      for (const marker of codeMarkers) {
+        if (firstLine === marker || firstLine.startsWith(marker)) {
+          // 移除第一行
+          lines.shift();
+          cleaned = lines.join('\n').trim();
+          markerFound = true;
+          break;
+        }
+      }
+      
+      // 如果第一行有标记但没有完全匹配，尝试从行中移除标记
+      if (!markerFound && lines[0]) {
+        for (const marker of codeMarkers) {
+          const index = lines[0].indexOf(marker);
+          if (index !== -1) {
+            // 从行中移除标记
+            lines[0] = lines[0].substring(index + marker.length).trim();
+            if (lines[0] === '') {
+              lines.shift(); // 如果行变空，完全移除它
+            }
+            cleaned = lines.join('\n').trim();
+            break;
+          }
+        }
+      }
+    }
+    
+    // 确保代码以换行符结尾（如果有内容）
+    if (cleaned && !cleaned.endsWith('\n')) {
+      cleaned += '\n';
+    }
+    
+    // 记录清理信息（仅当有变化时）
+    if (originalLength !== cleaned.length || codeContent.trim() !== cleaned.trim()) {
+      console.debug(`[CodeLine] Cleaned code content: ${originalLength} → ${cleaned.length} chars`);
+      const originalLines = codeContent.split('\n');
+      const cleanedLines = cleaned.split('\n');
+      console.debug(`[CodeLine] Original first line: "${originalLines[0]?.substring(0, 50)}${originalLines[0]?.length > 50 ? '...' : ''}"`);
+      console.debug(`[CodeLine] Cleaned first line: "${cleanedLines[0]?.substring(0, 50)}${cleanedLines[0]?.length > 50 ? '...' : ''}"`);
+    }
+    
+    return cleaned;
+  }
+  
   private async executeFileStep(step: TaskStep): Promise<string> {
     if (!this.fileManager) {
       throw new Error('File manager not available');
@@ -836,6 +954,12 @@ ${prompt}
       throw new Error('File step missing filePath or codeContent');
     }
     
+    // 清理代码内容，移除Markdown标记
+    console.debug(`[CodeLine] Processing file step for: ${filePath}`);
+    console.debug(`[CodeLine] Original code content length: ${codeContent.length} chars`);
+    const cleanedCodeContent = this.cleanCodeContent(codeContent);
+    console.debug(`[CodeLine] Cleaned code content length: ${cleanedCodeContent.length} chars`);
+    
     // 检查文件是否存在
     const exists = await this.fileManager.fileExists(filePath);
     
@@ -843,10 +967,10 @@ ${prompt}
     
     if (exists) {
       // 编辑现有文件
-      result = await this.fileManager.editFileWithDiff(filePath, codeContent);
+      result = await this.fileManager.editFileWithDiff(filePath, cleanedCodeContent);
     } else {
       // 创建新文件
-      result = await this.fileManager.createFile(filePath, codeContent);
+      result = await this.fileManager.createFile(filePath, cleanedCodeContent);
     }
     
     // 生成Cline风格的差异显示
