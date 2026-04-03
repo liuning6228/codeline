@@ -5,6 +5,17 @@ on:
     branches: [ main, develop ]
   pull_request:
     branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to run tests on'
+        required: false
+        default: 'production'
+        type: choice
+        options:
+        - production
+        - staging
+        - development
 
 jobs:
   test:
