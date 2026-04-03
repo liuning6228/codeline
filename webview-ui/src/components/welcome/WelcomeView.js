@@ -1,14 +1,15 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-const WelcomeView = ({ onGetStarted }) => {
-    const examplePrompts = [
+var WelcomeView = function (_a) {
+    var onGetStarted = _a.onGetStarted;
+    var examplePrompts = [
         'Create a React component for a login form',
         'Write a Python function to process CSV data',
         'Explain how async/await works in JavaScript',
         'Help me debug this TypeScript error',
         'Design a database schema for a todo app',
     ];
-    const features = [
+    var features = [
         {
             title: 'AI-Powered Coding',
             description: 'Get intelligent code suggestions and explanations',
@@ -53,11 +54,11 @@ const WelcomeView = ({ onGetStarted }) => {
         <div className="mb-12">
           <h2 className="mb-6 text-center text-2xl font-semibold">Why Choose CodeLine?</h2>
           <div className="grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
-            {features.map((feature, index) => (<div key={index} className="rounded-lg border border-border p-6 hover:bg-secondary/50">
+            {features.map(function (feature, index) { return (<div key={index} className="rounded-lg border border-border p-6 hover:bg-secondary/50">
                 <div className="mb-4 text-2xl">{feature.icon}</div>
                 <h3 className="mb-2 font-semibold">{feature.title}</h3>
                 <p className="text-sm text-gray-400">{feature.description}</p>
-              </div>))}
+              </div>); })}
           </div>
         </div>
 
@@ -72,9 +73,9 @@ const WelcomeView = ({ onGetStarted }) => {
             </div>
             
             <div className="mb-8 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
-              {examplePrompts.map((prompt, index) => (<button key={index} className="rounded-lg border border-border bg-background p-4 text-left hover:bg-background/80" onClick={onGetStarted}>
+              {examplePrompts.map(function (prompt, index) { return (<button key={index} className="rounded-lg border border-border bg-background p-4 text-left hover:bg-background/80" onClick={onGetStarted}>
                   <p className="text-sm">{prompt}</p>
-                </button>))}
+                </button>); })}
             </div>
 
             <div className="flex justify-center">
@@ -119,4 +120,3 @@ const WelcomeView = ({ onGetStarted }) => {
     </div>);
 };
 exports.default = WelcomeView;
-//# sourceMappingURL=WelcomeView.js.map

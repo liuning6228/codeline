@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-const MessageList = ({ messages }) => {
+var MessageList = function (_a) {
+    var messages = _a.messages;
     if (messages.length === 0) {
         return (<div className="flex h-full items-center justify-center">
         <div className="text-center text-gray-500">
@@ -10,10 +11,10 @@ const MessageList = ({ messages }) => {
       </div>);
     }
     return (<div className="space-y-6">
-      {messages.map((message) => (<div key={message.id} className={`rounded-lg border border-border p-4 ${message.role === 'user' ? 'ml-4 bg-secondary' : 'mr-4 bg-background'}`}>
+      {messages.map(function (message) { return (<div key={message.id} className={"rounded-lg border border-border p-4 ".concat(message.role === 'user' ? 'ml-4 bg-secondary' : 'mr-4 bg-background')}>
           <div className="mb-2 flex items-center justify-between">
             <div className="flex items-center space-x-2">
-              <div className={`h-2 w-2 rounded-full ${message.role === 'user' ? 'bg-primary' : message.role === 'assistant' ? 'bg-green-500' : 'bg-red-500'}`}></div>
+              <div className={"h-2 w-2 rounded-full ".concat(message.role === 'user' ? 'bg-primary' : message.role === 'assistant' ? 'bg-green-500' : 'bg-red-500')}></div>
               <span className="text-sm font-medium capitalize">
                 {message.role}
               </span>
@@ -43,8 +44,7 @@ const MessageList = ({ messages }) => {
                 </button>
               </>)}
           </div>
-        </div>))}
+        </div>); })}
     </div>);
 };
 exports.default = MessageList;
-//# sourceMappingURL=MessageList.js.map
