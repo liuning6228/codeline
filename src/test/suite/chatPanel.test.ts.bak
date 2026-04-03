@@ -1,0 +1,377 @@
+/**
+ * CodeLineChatPanel单元测试
+ */
+
+import * as assert from 'assert';
+import { CodeLineChatPanel, ChatMessage } from '../../chat/chatPanel';
+import { mockVscode } from '../helpers/mockVscode';
+import { CodeLineExtension } from '../../extension';
+import { TaskResult } from '../../task/taskEngine';
+
+// 模拟CodeLineExtension类
+class MockCodeLineExtension {
+  updateConfigCallCount = 0;
+  lastConfig?: any;
+  getModelInfoCallCount = 0;
+  approveFileDiffCallCount = 0;
+  executeFileCommandCallCount = 0;
+  getConfigCallCount = 0;
+  
+  updateConfig(newConfig: any): void {
+    this.updateConfigCallCount++;
+    this.lastConfig = newConfig;
+  }
+  
+  getModelInfo(): string {
+    this.getModelInfoCallCount++;
+    return 'Mock Model (configured)';
+  }
+  
+  async approveFileDiff(diffId: string, action: 'approve' | 'reject'): Promise<{success: boolean; message: string; error?: string}> {
+    this.approveFileDiffCallCount++;
+    return {
+      success: true,
+      message: `${action === 'approve' ? 'Approved' : 'Rejected'} diff ${diffId}`
+    };
+  }
+  
+  async executeFileCommand(command: string, data?: any): Promise<any> {
+    this.executeFileCommandCallCount++;
+    console.log(`[MockExtension] executeFileCommand: ${command}`, data);
+    
+    switch (command) {
+      case 'listFiles':
+        return {
+          files: [
+            { name: 'test.txt', type: 'file', size: 123 },
+            { name: 'src', type: 'directory' }
+          ]
+        };
+      case 'searchFiles':
+        return {
+          results: [
+            { file: 'test.txt', line: 1, content: 'Hello World' }
+          ]
+        };
+      case 'getStats':
+        return {
+          totalFiles: 10,
+          totalDirectories: 2,
+          totalSize: 10240
+        };
+      case 'browseDirectory':
+        return {
+          path: data?.path || '/',
+          files: [
+            { name: 'file.txt', type: 'file', size: 100 }
+          ]
+        };
+      default:
+        return { success: false, error: `Unknown command: ${command}` };
+    }
+  }
+  
+  getConfig(): any {
+    this.getConfigCallCount++;
+    return {
+      apiKey: 'test-key',
+      model: 'mock-model',
+      baseUrl: 'https://api.mock.com',
+      temperature: 0.7,
+      maxTokens: 2048,
+      autoAnalyze: false,
+      showExamples: true,
+      typingIndicator: true
+    };
+  }
+  
+  async testConnection(): Promise<boolean> {
+    return true;
+  }
+}
+
+// 模拟vscode.ExtensionContext
+class MockExtensionContext {
+  subscriptions: any[] = [];
+  workspaceState = {
+    get: () => undefined,
+    update: async () => {}
+  };
+  globalState = {
+    get: () => undefined,
+    update: async () => {}
+  };
+  extensionPath = '/tmp/mock-extension';
+  storagePath = '/tmp/mock-storage';
+  logPath = '/tmp/mock-logs';
+}
+
+// 跟踪createWebviewPanel的调用
+let createWebviewPanelCallCount = 0;
+let createdPanels: any[] = [];
+const originalCreateWebviewPanel = mockVscode.window.createWebviewPanel;
+
+// 创建增强的mock函数来跟踪调用
+function trackCreateWebviewPanelCalls() {
+  createWebviewPanelCallCount = 0;
+  createdPanels = [];
+  
+  mockVscode.window.createWebviewPanel = (viewType: string, title: string, column: any, options: any) => {
+    createWebviewPanelCallCount++;
+    const panel = originalCreateWebviewPanel(viewType, title, column, options);
+    
+    // 添加调用跟踪
+    const originalReveal = panel.reveal;
+    const originalDispose = panel.dispose;
+    let revealCallCount = 0;
+    let disposeCallCount = 0;
+    
+    panel.reveal = (col?: any) => {
+      revealCallCount++;
+      console.log(`[TRACK] Panel.reveal called (count: ${revealCallCount})`);
+      return originalReveal(col);
+    };
+    
+    panel.dispose = () => {
+      disposeCallCount++;
+      console.log(`[TRACK] Panel.dispose called (count: ${disposeCallCount})`);
+      return originalDispose();
+    };
+    
+    // 存储跟踪信息
+    panel._tracking = { revealCallCount, disposeCallCount };
+    createdPanels.push(panel);
+    
+    return panel;
+  };
+}
+
+// 恢复原始函数
+function restoreCreateWebviewPanel() {
+  mockVscode.window.createWebviewPanel = originalCreateWebviewPanel;
+}
+
+suite('CodeLineChatPanel Tests', () => {
+  let mockExtension: MockCodeLineExtension;
+  let mockContext: MockExtensionContext;
+  let originalVscode: any;
+  
+  beforeEach(() => {
+    // 保存原始vscode
+    originalVscode = (global as any).vscode;
+    // 设置mock vscode
+    (global as any).vscode = mockVscode;
+    
+    mockExtension = new MockCodeLineExtension();
+    mockContext = new MockExtensionContext();
+    
+    // 重置静态变量
+    CodeLineChatPanel.currentPanel = undefined;
+  });
+  
+  afterEach(() => {
+    // 恢复原始vscode
+    (global as any).vscode = originalVscode;
+  });
+  
+  test('createOrShow should create new panel when none exists', () => {
+    console.log('DEBUG: Testing createOrShow when no panel exists');
+    
+    // 设置跟踪
+    trackCreateWebviewPanelCalls();
+    
+    try {
+      CodeLineChatPanel.createOrShow(mockContext as any, mockExtension as any);
+      
+      assert.strictEqual(createWebviewPanelCallCount, 1, 'Should create webview panel');
+      assert.ok(CodeLineChatPanel.currentPanel, 'Current panel should be set');
+      assert.strictEqual(createdPanels.length, 1, 'Should have one created panel');
+      
+    } finally {
+      // 恢复原始函数
+      restoreCreateWebviewPanel();
+    }
+  });
+  
+  test('createOrShow should reveal existing panel', () => {
+    console.log('DEBUG: Testing createOrShow with existing panel');
+    
+    // 先创建一个panel
+    const mockPanel = new MockWebviewPanel();
+    const originalCreateWebviewPanel = mockVscode.window.createWebviewPanel;
+    mockVscode.window.createWebviewPanel = () => {
+      return mockPanel as any;
+    };
+    
+    // 创建第一个实例
+    CodeLineChatPanel.createOrShow(mockContext as any, mockExtension as any);
+    
+    // 重置调用计数
+    mockPanel.revealCallCount = 0;
+    
+    // 再次调用createOrShow（应该只reveal而不创建新panel）
+    CodeLineChatPanel.createOrShow(mockContext as any, mockExtension as any);
+    
+    assert.strictEqual(mockPanel.revealCallCount, 1, 'Should reveal existing panel');
+    
+    // 恢复原始函数
+    mockVscode.window.createWebviewPanel = originalCreateWebviewPanel;
+  });
+  
+  test('show method should work', async () => {
+    console.log('DEBUG: Testing show method');
+    
+    // 创建panel
+    const mockPanel = new MockWebviewPanel();
+    const originalCreateWebviewPanel = mockVscode.window.createWebviewPanel;
+    mockVscode.window.createWebviewPanel = () => {
+      return mockPanel as any;
+    };
+    
+    try {
+      // 创建实例
+      CodeLineChatPanel.createOrShow(mockContext as any, mockExtension as any);
+      const panel = CodeLineChatPanel.currentPanel!;
+      
+      // 调用show方法
+      await panel.show();
+      
+      // show方法应该调用createOrShow，由于panel已存在，应该调用reveal
+      assert.strictEqual(mockPanel.revealCallCount, 1, 'show should reveal panel');
+      
+    } finally {
+      mockVscode.window.createWebviewPanel = originalCreateWebviewPanel;
+    }
+  });
+  
+  // 注意：以下测试需要访问私有方法，在TypeScript中需要一些技巧
+  // 我们可以通过公共API间接测试，或者使用一些反射机制
+  
+  test('Webview message handling (indirect test)', async () => {
+    console.log('DEBUG: Testing webview message handling indirectly');
+    
+    // 这个测试比较困难，因为handleWebviewMessage是私有的
+    // 我们可以通过公共接口（如构造函数或公共方法）间接测试
+    // 或者扩展类以暴露测试接口
+    
+    // 暂时跳过详细实现，只验证基本概念
+    assert.ok(true, 'Webview message handling test placeholder');
+  });
+  
+  test('Extension configuration methods should be called', async () => {
+    console.log('DEBUG: Testing extension method calls');
+    
+    // 创建panel实例
+    const mockPanel = new MockWebviewPanel();
+    const originalCreateWebviewPanel = mockVscode.window.createWebviewPanel;
+    mockVscode.window.createWebviewPanel = () => {
+      return mockPanel as any;
+    };
+    
+    try {
+      CodeLineChatPanel.createOrShow(mockContext as any, mockExtension as any);
+      
+      // 验证getModelInfo被调用（在updateWebview中）
+      // 由于updateWebview是私有方法，我们暂时无法直接验证
+      // 但可以确认扩展实例被正确传递
+      
+      assert.ok(true, 'Extension methods integration placeholder');
+      
+    } finally {
+      mockVscode.window.createWebviewPanel = originalCreateWebviewPanel;
+    }
+  });
+  
+  // 测试模拟的fileCommand处理
+  test('File command handling through extension', async () => {
+    console.log('DEBUG: Testing file command execution');
+    
+    // 这个测试需要访问私有方法
+    // 我们可以考虑通过注入或重构来使chatPanel可测试
+    // 目前先创建基础测试框架
+    
+    assert.ok(true, 'File command handling test placeholder');
+  });
+  
+  test('Chat message structure', () => {
+    // 测试ChatMessage接口的实例
+    const message: ChatMessage = {
+      id: 'test-id',
+      role: 'user',
+      content: 'Hello, world!',
+      timestamp: new Date()
+    };
+    
+    assert.strictEqual(message.id, 'test-id', 'Message ID should match');
+    assert.strictEqual(message.role, 'user', 'Message role should be user');
+    assert.strictEqual(message.content, 'Hello, world!', 'Message content should match');
+    assert.ok(message.timestamp instanceof Date, 'Timestamp should be Date instance');
+  });
+  
+  test('Multiple panels should not be created', () => {
+    console.log('DEBUG: Testing singleton panel behavior');
+    
+    const mockPanel = new MockWebviewPanel();
+    let createWebviewPanelCallCount = 0;
+    
+    const originalCreateWebviewPanel = mockVscode.window.createWebviewPanel;
+    mockVscode.window.createWebviewPanel = () => {
+      createWebviewPanelCallCount++;
+      return mockPanel as any;
+    };
+    
+    try {
+      // 第一次创建
+      CodeLineChatPanel.createOrShow(mockContext as any, mockExtension as any);
+      const firstCallCount = createWebviewPanelCallCount;
+      
+      // 第二次创建（应该只reveal，不创建新panel）
+      CodeLineChatPanel.createOrShow(mockContext as any, mockExtension as any);
+      
+      assert.strictEqual(createWebviewPanelCallCount, firstCallCount, 
+        'Should not create additional panel when one exists');
+      assert.strictEqual(mockPanel.revealCallCount, 1, 'Should reveal existing panel');
+      
+    } finally {
+      mockVscode.window.createWebviewPanel = originalCreateWebviewPanel;
+    }
+  });
+  
+  test('Panel disposal should clear currentPanel', () => {
+    console.log('DEBUG: Testing panel disposal');
+    
+    const mockPanel = new MockWebviewPanel();
+    const originalCreateWebviewPanel = mockVscode.window.createWebviewPanel;
+    mockVscode.window.createWebviewPanel = () => {
+      return mockPanel as any;
+    };
+    
+    try {
+      // 创建panel
+      CodeLineChatPanel.createOrShow(mockContext as any, mockExtension as any);
+      assert.ok(CodeLineChatPanel.currentPanel, 'Current panel should be set');
+      
+      // 模拟dispose回调
+      let disposeCallback: (() => void) | undefined;
+      const originalOnDidDispose = mockPanel.onDidDispose;
+      mockPanel.onDidDispose = (callback: () => void) => {
+        disposeCallback = callback;
+        return { dispose: () => {} };
+      };
+      
+      // 触发dispose
+      if (disposeCallback) {
+        disposeCallback();
+      }
+      
+      // 当前panel应该被清除
+      // 注意：实际的dispose处理在chatPanel构造函数中，我们无法直接测试
+      // 但概念上应该清除currentPanel
+      
+      assert.ok(true, 'Panel disposal test placeholder');
+      
+    } finally {
+      mockVscode.window.createWebviewPanel = originalCreateWebviewPanel;
+    }
+  });
+});

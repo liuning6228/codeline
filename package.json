@@ -1,0 +1,344 @@
+{
+  "name": "codeline",
+  "displayName": "CodeLine",
+  "description": "AI coding assistant combining Cline's autonomous capabilities with Qoder's prompt engineering",
+  "version": "0.4.0",
+  "engines": {
+    "vscode": "^1.110.0"
+  },
+  "publisher": "codeline-dev",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yourusername/codeline"
+  },
+  "categories": [
+    "AI",
+    "Programming Languages",
+    "Snippets",
+    "Other"
+  ],
+  "keywords": [
+    "ai",
+    "coding",
+    "assistant",
+    "autonomous",
+    "cline",
+    "qoder",
+    "deepseek",
+    "claude"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "icon": "icon.png",
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "codeline.startChat",
+        "title": "CodeLine: Start Chat",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.executeTask",
+        "title": "CodeLine: Execute Task",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.analyzeProject",
+        "title": "CodeLine: Analyze Project Context",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.openSettings",
+        "title": "CodeLine: Open Settings",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.showEnhancedAnalysis",
+        "title": "CodeLine: Show Enhanced Analysis",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.toggleCodeCompletion",
+        "title": "CodeLine: Toggle Code Completion",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.clearCompletionCache",
+        "title": "CodeLine: Clear Completion Cache",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.chatButtonClicked",
+        "title": "Chat",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.tasksButtonClicked",
+        "title": "Tasks",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.settingsButtonClicked",
+        "title": "Settings",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.historyButtonClicked",
+        "title": "History",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.addToChat",
+        "title": "CodeLine: Add Selection to Chat",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.focusChatInput",
+        "title": "CodeLine: Focus Chat Input",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.explainCode",
+        "title": "CodeLine: Explain Code",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.improveCode",
+        "title": "CodeLine: Improve Code",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.generateGitCommitMessage",
+        "title": "CodeLine: Generate Git Commit Message",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.plugins.manage",
+        "title": "CodeLine: Manage Plugins",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.plugins.reload",
+        "title": "CodeLine: Reload Plugins",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.plugins.list",
+        "title": "CodeLine: List Plugins",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.plugins.install",
+        "title": "CodeLine: Install Plugin",
+        "category": "CodeLine"
+      },
+      {
+        "command": "codeline.plugins.status",
+        "title": "CodeLine: Plugin System Status",
+        "category": "CodeLine"
+      }
+    ],
+    "configuration": {
+      "title": "CodeLine",
+      "properties": {
+        "codeline.providerId": {
+          "type": "string",
+          "enum": [
+            "deepseek",
+            "openai",
+            "anthropic",
+            "qwen"
+          ],
+          "default": "deepseek",
+          "description": "AI model provider to use"
+        },
+        "codeline.defaultModel": {
+          "type": "string",
+          "enum": [
+            "deepseek-chat",
+            "deepseek-coder",
+            "deepseek-reasoner",
+            "gpt-4o",
+            "gpt-4-turbo",
+            "gpt-4",
+            "gpt-3.5-turbo",
+            "claude-3-5-sonnet-20241022",
+            "claude-3-opus-20240229",
+            "claude-3-sonnet-20240229",
+            "claude-3-haiku-20240307",
+            "qwen-max",
+            "qwen-plus",
+            "qwen-turbo",
+            "qwen2.5-coder-32b-instruct",
+            "qwen2.5-coder-7b-instruct"
+          ],
+          "default": "deepseek-chat",
+          "description": "Default AI model to use"
+        },
+        "codeline.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for AI service (leave empty to use environment variable)"
+        },
+        "codeline.enableProjectAnalysis": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable automatic project context analysis"
+        },
+        "codeline.promptStyle": {
+          "type": "string",
+          "enum": [
+            "qoder-java",
+            "qoder-python",
+            "qoder-web",
+            "custom"
+          ],
+          "default": "qoder-java",
+          "description": "Prompt style template to use"
+        },
+        "codeline.maxContextFiles": {
+          "type": "number",
+          "default": 10,
+          "description": "Maximum number of files to include in context"
+        },
+        "codeline.enableCodeCompletion": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable AI-powered code completion"
+        },
+        "codeline.completionTriggerDelay": {
+          "type": "number",
+          "default": 300,
+          "description": "Delay in milliseconds before triggering AI completions"
+        },
+        "codeline.completionMaxItems": {
+          "type": "number",
+          "default": 10,
+          "description": "Maximum number of AI completion items to show"
+        },
+        "codeline.completionMinConfidence": {
+          "type": "number",
+          "default": 0.3,
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Minimum confidence score for AI completion suggestions (0.0-1.0)"
+        },
+        "codeline.completionUseEnhancedContext": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use enhanced project context analysis for better completions"
+        },
+        "codeline.completionCacheEnabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable caching of AI completion results"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "codeline-activitybar",
+          "title": "CodeLine",
+          "icon": "icon.png"
+        }
+      ]
+    },
+    "views": {
+      "codeline-activitybar": [
+        {
+          "id": "codeline.chat",
+          "name": "Chat",
+          "type": "webview",
+          "contextualTitle": "CodeLine Chat"
+        }
+      ]
+    },
+    "menus": {
+      "view/title": [
+        {
+          "command": "codeline.chatButtonClicked",
+          "when": "view == codeline.chat",
+          "group": "navigation"
+        },
+        {
+          "command": "codeline.tasksButtonClicked",
+          "when": "view == codeline.chat",
+          "group": "navigation"
+        },
+        {
+          "command": "codeline.settingsButtonClicked",
+          "when": "view == codeline.chat",
+          "group": "navigation"
+        },
+        {
+          "command": "codeline.historyButtonClicked",
+          "when": "view == codeline.chat",
+          "group": "navigation"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "codeline.addToChat",
+          "when": "editorHasSelection",
+          "group": "codeline"
+        },
+        {
+          "command": "codeline.explainCode",
+          "when": "editorHasSelection",
+          "group": "codeline"
+        },
+        {
+          "command": "codeline.improveCode",
+          "when": "editorHasSelection",
+          "group": "codeline"
+        },
+        {
+          "command": "codeline.generateGitCommitMessage",
+          "when": "resourceScheme == file",
+          "group": "codeline"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "vsce package",
+    "test": "npm run compile && npx mocha --config ./.mocharc.json",
+    "test:unit": "npm run compile && npx mocha --config ./.mocharc.unit.json",
+    "test:integration": "npm run compile && npx mocha --config ./.mocharc.integration.json",
+    "test:filemanager": "npm run compile && node -e \"const Module = require('module'); const originalRequire = Module.prototype.require; Module.prototype.require = function(id) { if (id === 'vscode') { return require('./out/test/helpers/mockVscode.js'); } return originalRequire.apply(this, arguments); }; require('./out/test/suite/fileManager.test.js');\"",
+    "test:e2e": "npm run compile && npm run test -- --extensionTestsPath=./out/test/suite/index.js",
+    "test:coverage": "npm run compile && npx nyc mocha --config ./.mocharc.unit.json",
+    "test:debug": "npm run compile && node --inspect-brk ./out/test/runAllTests.js"
+  },
+  "devDependencies": {
+    "@istanbuljs/nyc-config-typescript": "^1.0.2",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^20.19.37",
+    "@types/vscode": "^1.110.0",
+    "@vscode/test-electron": "^2.5.2",
+    "glob": "^13.0.6",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
+    "lodash": "^4.17.23",
+    "mocha": "^11.7.5",
+    "nyc": "^18.0.0",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.9.3",
+    "vsce": "^2.15.0"
+  },
+  "dependencies": {
+    "axios": "^1.13.6"
+  },
+  "bundledDependencies": [
+    "axios"
+  ],
+  "bundleDependencies": [
+    "axios"
+  ]
+}
