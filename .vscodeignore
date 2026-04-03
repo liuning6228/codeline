@@ -5,7 +5,9 @@
 .gitignore
 .github/
 .vscode/
-node_modules/
+node_modules/*
+!node_modules/axios/
+!node_modules/axios/**/*
 *.ts
 !*.d.ts
 src/
