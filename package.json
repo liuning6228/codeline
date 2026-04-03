@@ -308,7 +308,7 @@
     "vscode:prepublish": "npm run compile",
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "package": "vsce package",
+    "package": "npx @vscode/vsce package",
     "test": "npm run compile && npx mocha --config ./.mocharc.json",
     "test:unit": "npm run compile && npx mocha --config ./.mocharc.unit.json",
     "test:integration": "npm run compile && npx mocha --config ./.mocharc.integration.json",
@@ -323,6 +323,7 @@
     "@types/node": "^20.19.37",
     "@types/vscode": "^1.110.0",
     "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.7.1",
     "glob": "^13.0.6",
     "husky": "^9.1.7",
     "lint-staged": "^16.4.0",
@@ -330,8 +331,7 @@
     "mocha": "^11.7.5",
     "nyc": "^18.0.0",
     "ts-node": "^10.9.2",
-    "typescript": "^5.9.3",
-    "vsce": "^2.15.0"
+    "typescript": "^5.9.3"
   },
   "dependencies": {
     "axios": "^1.13.6"
