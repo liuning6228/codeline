@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <!-- 背景透明 -->
+  <rect width="128" height="128" fill="none"/>
+  
+  <!-- C字母 -->
+  <path d="M40,64
+           A24,24 0 1,1 88,64
+           A24,24 0 1,1 40,64" 
+        fill="#4ec9b0" stroke="#4ec9b0" stroke-width="4"/>
+  
+  <!-- L字母 -->
+  <rect x="60" y="40" width="12" height="48" fill="#007acc"/>
+  <rect x="60" y="80" width="24" height="12" fill="#007acc"/>
+  
+  <!-- 代码符号 </> -->
+  <text x="90" y="70" font-family="Arial" font-size="16" fill="#ffffff">
+    &lt;/&gt;
+  </text>
+</svg>

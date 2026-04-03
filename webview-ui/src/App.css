@@ -1,0 +1,31 @@
+/* App-specific styles */
+
+/* 确保所有组件使用一致的变量 */
+:root {
+  --background: var(--vscode-editor-background, #1e1e1e);
+  --foreground: var(--vscode-editor-foreground, #d4d4d4);
+  --border: var(--vscode-panel-border, #3e3e42);
+  --primary: var(--vscode-button-background, #007acc);
+  --primary-foreground: var(--vscode-button-foreground, #ffffff);
+  --secondary: var(--vscode-button-secondaryBackground, #3e3e42);
+  --secondary-foreground: var(--vscode-button-secondaryForeground, #cccccc);
+}
+
+/* 自定义滚动条 */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--secondary);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 5px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #4e4e52;
+}

@@ -2,7 +2,7 @@
   "name": "codeline",
   "displayName": "CodeLine",
   "description": "AI coding assistant combining Cline's autonomous capabilities with Qoder's prompt engineering",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "engines": {
     "vscode": "^1.110.0"
   },
@@ -11,6 +11,7 @@
     "type": "git",
     "url": "https://github.com/yourusername/codeline"
   },
+  "license": "MIT",
   "categories": [
     "AI",
     "Programming Languages",
@@ -312,7 +313,7 @@
     "test:unit": "npm run compile && npx mocha --config ./.mocharc.unit.json",
     "test:integration": "npm run compile && npx mocha --config ./.mocharc.integration.json",
     "test:filemanager": "npm run compile && node -e \"const Module = require('module'); const originalRequire = Module.prototype.require; Module.prototype.require = function(id) { if (id === 'vscode') { return require('./out/test/helpers/mockVscode.js'); } return originalRequire.apply(this, arguments); }; require('./out/test/suite/fileManager.test.js');\"",
-    "test:e2e": "npm run compile && npm run test -- --extensionTestsPath=./out/test/suite/index.js",
+    "test:e2e": "npm run compile && npx mocha --config ./.mocharc.e2e.json",
     "test:coverage": "npm run compile && npx nyc mocha --config ./.mocharc.unit.json",
     "test:debug": "npm run compile && node --inspect-brk ./out/test/runAllTests.js"
   },

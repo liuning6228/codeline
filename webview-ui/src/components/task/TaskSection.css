@@ -1,0 +1,180 @@
+/* TaskSection 组件样式 - Cline风格优化 */
+
+.task-section {
+  transition: all 0.2s ease-in-out;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen', 'Ubuntu', sans-serif;
+}
+
+/* Cline风格头部 */
+.task-section-header {
+  @apply bg-[#1a1a1a] border-b border-[#2a2a2a] px-4 py-3;
+  transition: background-color 0.2s ease;
+}
+
+.task-section-header:hover {
+  @apply bg-[#222222];
+}
+
+/* 进度条样式 - Cline风格 */
+.cline-progress-bar {
+  @apply h-1.5 bg-[#2a2a2a] rounded-full overflow-hidden;
+}
+
+.cline-progress-fill {
+  @apply h-full bg-gradient-to-r from-blue-500 to-cyan-400 transition-all duration-300 ease-out;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+}
+
+/* 步骤列表 - Cline风格 */
+.cline-step-item {
+  @apply flex items-center space-x-3 px-3 py-2.5 rounded-lg border border-transparent;
+  transition: all 0.2s ease;
+}
+
+.cline-step-item:hover {
+  @apply bg-[#222222] border-[#333333];
+}
+
+.cline-step-status {
+  @apply w-2.5 h-2.5 rounded-full flex-shrink-0;
+}
+
+.cline-step-status.pending {
+  @apply bg-[#555555];
+}
+
+.cline-step-status.executing {
+  @apply bg-gradient-to-r from-blue-500 to-cyan-400;
+  animation: cline-pulse 1.5s ease-in-out infinite;
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.4);
+}
+
+.cline-step-status.completed {
+  @apply bg-gradient-to-r from-green-500 to-emerald-400;
+  box-shadow: 0 0 4px rgba(16, 185, 129, 0.3);
+}
+
+.cline-step-status.failed {
+  @apply bg-gradient-to-r from-red-500 to-rose-400;
+  box-shadow: 0 0 4px rgba(239, 68, 68, 0.3);
+}
+
+/* 事件日志 - Cline风格 */
+.cline-event-item {
+  @apply flex items-start space-x-3 px-3 py-2.5 rounded-lg border border-transparent;
+  transition: all 0.15s ease;
+}
+
+.cline-event-item:hover {
+  @apply bg-[#222222] border-[#333333];
+}
+
+.cline-event-icon {
+  @apply w-5 h-5 flex items-center justify-center flex-shrink-0 text-sm;
+}
+
+.cline-event-content {
+  @apply flex-1 min-w-0;
+}
+
+/* 状态统计卡片 - Cline风格 */
+.cline-stat-card {
+  @apply bg-gradient-to-br from-[#1a1a1a] to-[#222222] border border-[#2a2a2a] rounded-xl p-3;
+  transition: all 0.2s ease;
+}
+
+.cline-stat-card:hover {
+  @apply border-[#333333] shadow-lg;
+  transform: translateY(-1px);
+}
+
+.cline-stat-label {
+  @apply text-xs font-medium text-[#888888] uppercase tracking-wider;
+}
+
+.cline-stat-value {
+  @apply text-lg font-semibold text-white;
+}
+
+/* 按钮样式 - Cline风格 */
+.cline-button {
+  @apply px-3 py-1.5 text-sm font-medium rounded-lg transition-all duration-200;
+}
+
+.cline-button-primary {
+  @apply bg-gradient-to-r from-blue-600 to-cyan-500 text-white hover:from-blue-700 hover:to-cyan-600;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
+}
+
+.cline-button-secondary {
+  @apply bg-[#2a2a2a] text-[#cccccc] hover:bg-[#333333] border border-[#3a3a3a];
+}
+
+.cline-button-danger {
+  @apply bg-gradient-to-r from-red-600 to-rose-500 text-white hover:from-red-700 hover:to-rose-600;
+}
+
+/* 动画 */
+@keyframes cline-pulse {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.7;
+    transform: scale(1.05);
+  }
+}
+
+@keyframes cline-slide-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.cline-slide-in {
+  animation: cline-slide-in 0.3s ease-out forwards;
+}
+
+/* 滚动条样式 - Cline风格 */
+.task-section ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.task-section ::-webkit-scrollbar-track {
+  @apply bg-[#1a1a1a] rounded-lg;
+}
+
+.task-section ::-webkit-scrollbar-thumb {
+  @apply bg-[#3a3a3a] rounded-lg;
+}
+
+.task-section ::-webkit-scrollbar-thumb:hover {
+  @apply bg-[#4a4a4a];
+}
+
+/* 折叠动画 */
+.task-section-expandable {
+  animation: cline-slide-in 0.2s ease-out;
+}
+
+/* 响应式调整 */
+@media (max-width: 640px) {
+  .task-section {
+    font-size: 0.875rem;
+  }
+  
+  .cline-stat-card {
+    @apply p-2;
+  }
+  
+  .cline-button {
+    @apply px-2.5 py-1 text-xs;
+  }
+}

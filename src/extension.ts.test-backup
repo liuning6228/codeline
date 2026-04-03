@@ -1,0 +1,646 @@
+import * as vscode from 'vscode';
+import { CodeLineChatPanel } from './chat/chatPanel';
+import { ProjectAnalyzer } from './analyzer/projectAnalyzer';
+import { PromptEngine } from './prompt/promptEngine';
+import { ModelAdapter } from './models/modelAdapter';
+import { TaskEngine, TaskResult } from './task/taskEngine';
+import { FileManager } from './file/fileManager';
+import { TerminalExecutor } from './terminal/terminalExecutor';
+import { BrowserAutomator } from './browser/browserAutomator';
+
+export class CodeLineExtension {
+  private static instance: CodeLineExtension;
+  private projectAnalyzer: ProjectAnalyzer;
+  private promptEngine: PromptEngine;
+  private modelAdapter: ModelAdapter;
+  private fileManager?: FileManager;
+  private taskEngine?: TaskEngine;
+  private terminalExecutor?: TerminalExecutor;
+  private browserAutomator?: BrowserAutomator;
+  private context: vscode.ExtensionContext;
+
+  private constructor(context: vscode.ExtensionContext) {
+    this.context = context;
+    this.projectAnalyzer = new ProjectAnalyzer();
+    this.promptEngine = new PromptEngine();
+    this.modelAdapter = new ModelAdapter();
+  }
+
+  public static getInstance(context?: vscode.ExtensionContext): CodeLineExtension {
+    if (!CodeLineExtension.instance && context) {
+      CodeLineExtension.instance = new CodeLineExtension(context);
+    }
+    return CodeLineExtension.instance;
+  }
+
+  /**
+   * 初始化Cline风格的任务引擎（按需创建）
+   */
+  private async ensureTaskEngineInitialized(): Promise<{ 
+    fileManager: FileManager; 
+    taskEngine: TaskEngine;
+    terminalExecutor: TerminalExecutor;
+    browserAutomator: BrowserAutomator;
+  }> {
+    if (!this.fileManager || !this.taskEngine || !this.terminalExecutor || !this.browserAutomator) {
+      const workspaceFolders = vscode.workspace.workspaceFolders;
+      if (!workspaceFolders || workspaceFolders.length === 0) {
+        throw new Error('No workspace folder open. Please open a project first.');
+      }
+      
+      const workspaceRoot = workspaceFolders[0].uri.fsPath;
+      this.fileManager = new FileManager(workspaceRoot);
+      this.terminalExecutor = new TerminalExecutor();
+      this.browserAutomator = new BrowserAutomator();
+      this.taskEngine = new TaskEngine(
+        this.projectAnalyzer,
+        this.promptEngine,
+        this.modelAdapter,
+        this.fileManager,
+        this.terminalExecutor,
+        this.browserAutomator
+      );
+    }
+    
+    return { 
+      fileManager: this.fileManager!, 
+      taskEngine: this.taskEngine!,
+      terminalExecutor: this.terminalExecutor!,
+      browserAutomator: this.browserAutomator!
+    };
+  }
+
+  public async startChat() {
+    // Check if configuration is ready before opening chat
+    if (!this.modelAdapter.isReady()) {
+      const result = await vscode.window.showErrorMessage(
+        'CodeLine is not configured. Please set your API key in settings.',
+        'Open Settings',
+        'Cancel'
+      );
+      
+      if (result === 'Open Settings') {
+        vscode.commands.executeCommand('codeline.openSettings');
+      }
+      return;
+    }
+    
+    CodeLineChatPanel.createOrShow(this.context, this);
+  }
+
+  public async executeTask(taskDescription: string) {
+    // 向后兼容：如果未配置模型，显示错误
+    if (!this.modelAdapter.isReady()) {
+      const result = await vscode.window.showErrorMessage(
+        'CodeLine is not configured. Please set your API key in settings.',
+        'Open Settings',
+        'Cancel'
+      );
+      
+      if (result === 'Open Settings') {
+        vscode.commands.executeCommand('codeline.openSettings');
+      }
+      return;
+    }
+    
+    try {
+      // 使用新的任务引擎
+      const { taskEngine } = await this.ensureTaskEngineInitialized();
+      
+      // 显示进度通知
+      const progressOptions = {
+        location: vscode.ProgressLocation.Notification,
+        title: "CodeLine Task",
+        cancellable: true
+      };
+      
+      return await vscode.window.withProgress(progressOptions, async (progress, token) => {
+        progress.report({ message: "Analyzing task and generating plan..." });
+        
+        // 开始任务处理
+        const taskResult = await taskEngine.startTask(taskDescription, {
+          autoExecute: true,
+          requireApproval: false, // 初始版本自动执行，后续添加批准流程
+          promptOptions: {
+            includeExamples: true,
+            includeConstraints: true,
+            includeBestPractices: true
+          }
+        });
+        
+        if (taskResult.success) {
+          progress.report({ message: "Task completed successfully!" });
+          
+          // 显示成功消息和步骤摘要
+          const completedSteps = taskResult.steps.filter(s => s.status === 'completed').length;
+          const totalSteps = taskResult.steps.length;
+          
+          const resultMessage = `Task completed: ${completedSteps}/${totalSteps} steps executed`;
+          vscode.window.showInformationMessage(resultMessage, 'View Details').then(selection => {
+            if (selection === 'View Details') {
+              // 在输出面板显示详细结果
+              this.showTaskResults(taskResult);
+            }
+          });
+          
+          return taskResult;
+        } else {
+          progress.report({ message: "Task failed" });
+          vscode.window.showErrorMessage(`Task failed: ${taskResult.error}`);
+          return taskResult;
+        }
+      });
+      
+    } catch (error: any) {
+      vscode.window.showErrorMessage(`Task execution error: ${error.message}`);
+      throw error;
+    }
+  }
+
+  public async analyzeProject() {
+    const context = await this.projectAnalyzer.analyzeCurrentWorkspace();
+    vscode.window.showInformationMessage(
+      `Project analyzed: ${context.projectType}, ${context.language}, ${context.files.length} files`
+    );
+    return context;
+  }
+
+  /**
+   * 在输出面板显示任务结果
+   */
+  private showTaskResults(taskResult: TaskResult): void {
+    const outputChannel = vscode.window.createOutputChannel('CodeLine Task Results');
+    outputChannel.show(true);
+    
+    outputChannel.appendLine('=== CodeLine Task Results ===');
+    outputChannel.appendLine(`Task: ${taskResult.success ? 'SUCCESS' : 'FAILED'}`);
+    outputChannel.appendLine('');
+    
+    if (taskResult.error) {
+      outputChannel.appendLine(`Error: ${taskResult.error}`);
+      outputChannel.appendLine('');
+    }
+    
+    // 显示步骤摘要
+    outputChannel.appendLine('Steps Summary:');
+    taskResult.steps.forEach((step, index) => {
+      const statusIcon = step.status === 'completed' ? '✓' :
+                        step.status === 'failed' ? '✗' :
+                        step.status === 'executing' ? '⟳' : '⏸';
+      
+      outputChannel.appendLine(`  ${index + 1}. [${statusIcon}] ${step.type}: ${step.description}`);
+      
+      if (step.result) {
+        outputChannel.appendLine(`     Result: ${step.result.substring(0, 200)}${step.result.length > 200 ? '...' : ''}`);
+      }
+      if (step.error) {
+        outputChannel.appendLine(`     Error: ${step.error}`);
+      }
+    });
+    
+    outputChannel.appendLine('');
+    outputChannel.appendLine('Detailed Output:');
+    outputChannel.appendLine(taskResult.output);
+  }
+
+  public getModelAdapter() {
+    return this.modelAdapter;
+  }
+
+  public getModelInfo(): string {
+    const config = this.modelAdapter.getConfiguration();
+    if (!config.apiKey) {
+      return 'Not configured';
+    }
+    return `${config.model} (${config.baseUrl})`;
+  }
+
+  public getConfig() {
+    return this.modelAdapter.getConfiguration();
+  }
+
+  public updateConfig(newConfig: any) {
+    this.modelAdapter.updateConfiguration(newConfig);
+  }
+
+  /**
+   * 批准或拒绝文件差异（从UI调用）
+   */
+  public async approveFileDiff(diffId: string, action: 'approve' | 'reject'): Promise<{success: boolean; message: string; error?: string}> {
+    try {
+      const { taskEngine } = await this.ensureTaskEngineInitialized();
+      return await taskEngine.approveDiff(diffId, action);
+    } catch (error: any) {
+      return {
+        success: false,
+        message: `Failed to ${action} file changes: ${error.message}`,
+        error: error.message
+      };
+    }
+  }
+}
+
+export function activate(context: vscode.ExtensionContext) {
+  console.log('CodeLine extension is now active!');
+  
+  const codeLine = CodeLineExtension.getInstance(context);
+
+  // Register commands
+  const startChatCommand = vscode.commands.registerCommand('codeline.startChat', () => {
+    codeLine.startChat();
+  });
+
+  const executeTaskCommand = vscode.commands.registerCommand('codeline.executeTask', async () => {
+    const task = await vscode.window.showInputBox({
+      prompt: 'Enter the task you want CodeLine to execute',
+      placeHolder: 'e.g., Create a user login API endpoint'
+    });
+    if (task) {
+      await codeLine.executeTask(task);
+    }
+  });
+
+  const analyzeProjectCommand = vscode.commands.registerCommand('codeline.analyzeProject', () => {
+    codeLine.analyzeProject();
+  });
+
+  const openSettingsCommand = vscode.commands.registerCommand('codeline.openSettings', () => {
+    vscode.commands.executeCommand('workbench.action.openSettings', '@ext:codeline');
+  });
+
+  // Cline风格的新命令
+  const executeClineTaskCommand = vscode.commands.registerCommand('codeline.executeClineTask', async () => {
+    const task = await vscode.window.showInputBox({
+      prompt: 'Enter task for Cline-style execution (with Qoder prompts)',
+      placeHolder: 'e.g., Create a user login API endpoint with Spring Boot',
+      value: 'Create a REST API endpoint for user authentication with proper validation'
+    });
+    if (task) {
+      await codeLine.executeTask(task);
+    }
+  });
+
+  const showFileDiffCommand = vscode.commands.registerCommand('codeline.showFileDiff', async () => {
+    vscode.window.showInformationMessage('File diff feature will be available in the Cline-style UI');
+    // 后续实现：打开文件差异视图
+  });
+
+  const approveChangesCommand = vscode.commands.registerCommand('codeline.approveChanges', async () => {
+    vscode.window.showInformationMessage('Approve changes feature will be available in the Cline-style UI');
+    // 后续实现：批准待处理的更改
+  });
+
+  // Register view for activity bar icon
+  const chatViewProvider = new (class implements vscode.WebviewViewProvider {
+    resolveWebviewView(webviewView: vscode.WebviewView) {
+      webviewView.webview.options = {
+        enableScripts: true,
+        localResourceRoots: []
+      };
+      
+      // Check configuration before showing webview
+      if (!codeLine.getModelAdapter().isReady()) {
+        webviewView.webview.html = `
+          <!DOCTYPE html>
+          <html>
+          <head>
+            <style>
+              body { 
+                padding: 20px; 
+                font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+                background-color: #1e1e1e;
+                color: #d4d4d4;
+                height: 100%;
+                margin: 0;
+              }
+              .container {
+                max-width: 500px;
+                margin: 0 auto;
+                text-align: center;
+                padding-top: 40px;
+              }
+              .icon {
+                font-size: 48px;
+                margin-bottom: 20px;
+                color: #4ec9b0;
+              }
+              h2 { 
+                color: #4ec9b0; 
+                margin-bottom: 16px;
+                font-weight: 600;
+              }
+              .message {
+                background: #252526;
+                border-radius: 8px;
+                padding: 20px;
+                margin-bottom: 24px;
+                border-left: 4px solid #f44747;
+              }
+              .action-button {
+                background: #007acc;
+                color: white;
+                border: none;
+                padding: 12px 24px;
+                border-radius: 6px;
+                cursor: pointer;
+                font-weight: 500;
+                font-size: 14px;
+                transition: background-color 0.2s;
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+              }
+              .action-button:hover {
+                background: #0062a3;
+              }
+              .instructions {
+                margin-top: 24px;
+                padding: 16px;
+                background: #2d2d30;
+                border-radius: 6px;
+                text-align: left;
+                font-size: 13px;
+              }
+              .instruction-step {
+                margin-bottom: 12px;
+                display: flex;
+                align-items: flex-start;
+                gap: 8px;
+              }
+              .step-number {
+                background: #3e3e42;
+                color: #d4d4d4;
+                width: 24px;
+                height: 24px;
+                border-radius: 50%;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                font-size: 12px;
+                flex-shrink: 0;
+              }
+              .tip {
+                font-size: 12px;
+                color: #858585;
+                margin-top: 8px;
+                font-style: italic;
+              }
+            </style>
+          </head>
+          <body>
+            <div class="container">
+              <div class="icon">✨</div>
+              <h2>Welcome to CodeLine</h2>
+              
+              <div class="message">
+                <h3>Configuration Required</h3>
+                <p>CodeLine needs an API key to connect to AI services. Please configure your settings to get started.</p>
+              </div>
+              
+              <button class="action-button" onclick="openSettings()">
+                <span>⚙️</span>
+                Open Settings
+              </button>
+              
+              <div class="instructions">
+                <div class="instruction-step">
+                  <div class="step-number">1</div>
+                  <div>Click "Open Settings" above or press Ctrl+Shift+P and search for "CodeLine: Open Settings"</div>
+                </div>
+                <div class="instruction-step">
+                  <div class="step-number">2</div>
+                  <div>Enter your API key (DeepSeek, Claude, GPT, or Qwen)</div>
+                </div>
+                <div class="instruction-step">
+                  <div class="step-number">3</div>
+                  <div>Select your preferred model and adjust other settings</div>
+                </div>
+                <div class="instruction-step">
+                  <div class="step-number">4</div>
+                  <div>Return here and the interface will automatically refresh</div>
+                </div>
+                
+                <div class="tip">
+                  💡 You can get a free API key from DeepSeek at <a href="https://platform.deepseek.com" style="color: #4ec9b0;">platform.deepseek.com</a>
+                </div>
+              </div>
+            </div>
+            <script>
+              const vscode = acquireVsCodeApi();
+              function openSettings() {
+                vscode.postMessage({ command: 'openSettings' });
+              }
+            </script>
+          </body>
+          </html>
+        `;
+        
+        webviewView.webview.onDidReceiveMessage(async message => {
+          if (message.command === 'openSettings') {
+            vscode.commands.executeCommand('codeline.openSettings');
+          }
+        });
+        
+        return;
+      }
+      
+      // If configured, show the enhanced chat interface
+      webviewView.webview.html = `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body { 
+              padding: 0; 
+              margin: 0;
+              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+              background-color: #1e1e1e;
+              color: #d4d4d4;
+              height: 100vh;
+              overflow: hidden;
+              display: flex;
+              flex-direction: column;
+            }
+            .header {
+              padding: 16px;
+              border-bottom: 1px solid #3e3e42;
+              background: #252526;
+              display: flex;
+              justify-content: space-between;
+              align-items: center;
+            }
+            .header h2 {
+              margin: 0;
+              color: #4ec9b0;
+              font-size: 16px;
+              font-weight: 600;
+            }
+            .model-info {
+              font-size: 12px;
+              color: #858585;
+              background: #2d2d30;
+              padding: 4px 8px;
+              border-radius: 4px;
+              border: 1px solid #3e3e42;
+            }
+            .content {
+              flex: 1;
+              padding: 20px;
+              overflow-y: auto;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              text-align: center;
+            }
+            .welcome-icon {
+              font-size: 64px;
+              margin-bottom: 20px;
+              color: #4ec9b0;
+            }
+            .welcome-title {
+              color: #4ec9b0;
+              font-size: 24px;
+              margin-bottom: 12px;
+              font-weight: 600;
+            }
+            .welcome-message {
+              max-width: 500px;
+              margin-bottom: 24px;
+              line-height: 1.5;
+            }
+            .actions {
+              display: flex;
+              gap: 12px;
+              margin-top: 20px;
+              flex-wrap: wrap;
+              justify-content: center;
+            }
+            .action-button {
+              background: #007acc;
+              color: white;
+              border: none;
+              padding: 12px 20px;
+              border-radius: 6px;
+              cursor: pointer;
+              font-weight: 500;
+              font-size: 14px;
+              transition: background-color 0.2s;
+              display: inline-flex;
+              align-items: center;
+              gap: 8px;
+            }
+            .action-button:hover {
+              background: #0062a3;
+            }
+            .action-button.secondary {
+              background: #3e3e42;
+            }
+            .action-button.secondary:hover {
+              background: #4e4e52;
+            }
+            .tip {
+              margin-top: 30px;
+              padding: 16px;
+              background: #252526;
+              border-radius: 8px;
+              max-width: 500px;
+              font-size: 13px;
+              border-left: 4px solid #2d7d46;
+            }
+            .tip strong {
+              color: #4ec9b0;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h2>CODELINE: CHAT</h2>
+            <div class="model-info" id="modelInfo">${codeLine.getModelInfo()}</div>
+          </div>
+          
+          <div class="content">
+            <div class="welcome-icon">🤖</div>
+            <div class="welcome-title">CodeLine Ready</div>
+            <div class="welcome-message">
+              Your AI coding assistant is configured and ready to help with programming tasks.
+              Use the command palette to access full features or try the quick actions below.
+            </div>
+            
+            <div class="actions">
+              <button class="action-button" onclick="startChat()">
+                <span>✨</span>
+                Start New Chat
+              </button>
+              <button class="action-button secondary" onclick="executeSampleTask()">
+                <span>⚡</span>
+                Sample Task
+              </button>
+              <button class="action-button secondary" onclick="openSettings()">
+                <span>⚙️</span>
+                Settings
+              </button>
+            </div>
+            
+            <div class="tip">
+              <strong>Quick Start:</strong> Press Ctrl+Shift+P and search for "CodeLine: Start Chat" to open the full chat interface with file diffs, task execution, and approval workflows.
+            </div>
+          </div>
+          
+          <script>
+            const vscode = acquireVsCodeApi();
+            
+            function startChat() {
+              vscode.postMessage({ command: 'startChat' });
+            }
+            
+            function executeSampleTask() {
+              vscode.postMessage({ 
+                command: 'executeTask', 
+                task: 'Create a REST API endpoint for user authentication with validation'
+              });
+            }
+            
+            function openSettings() {
+              vscode.postMessage({ command: 'openSettings' });
+            }
+            
+            // Update model info periodically
+            setInterval(() => {
+              document.getElementById('modelInfo').textContent = '${codeLine.getModelInfo()}';
+            }, 5000);
+          </script>
+        </body>
+        </html>
+      `;
+      
+      webviewView.webview.onDidReceiveMessage(async message => {
+        if (message.command === 'openSettings') {
+          vscode.commands.executeCommand('codeline.openSettings');
+        } else if (message.command === 'startChat') {
+          codeLine.startChat();
+        } else if (message.command === 'executeTask' && message.task) {
+          await codeLine.executeTask(message.task);
+        }
+      });
+    }
+  })();
+
+  const chatViewProviderRegistration = vscode.window.registerWebviewViewProvider(
+    'codeline.chat',
+    chatViewProvider
+  );
+
+  context.subscriptions.push(
+    startChatCommand,
+    executeTaskCommand,
+    executeClineTaskCommand,
+    showFileDiffCommand,
+    approveChangesCommand,
+    analyzeProjectCommand,
+    openSettingsCommand,
+    chatViewProviderRegistration
+  );
+}
+
+export function deactivate() {}

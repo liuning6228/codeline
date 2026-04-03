@@ -1,0 +1,2022 @@
+import * as vscode from 'vscode';
+import { CodeLineExtension } from '../extension';
+import { TaskResult } from '../task/taskEngine';
+
+export interface ChatMessage {
+  id: string;
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: Date;
+}
+
+export class CodeLineChatPanel {
+  public static currentPanel: CodeLineChatPanel | undefined;
+  private readonly panel: vscode.WebviewPanel;
+  private readonly extension: CodeLineExtension;
+  private readonly context: vscode.ExtensionContext;
+  private messages: ChatMessage[] = [];
+  private isProcessing = false;
+  private currentView: 'chat' | 'settings' | 'history' = 'chat';
+
+  public static createOrShow(context: vscode.ExtensionContext, extension: CodeLineExtension) {
+    const column = vscode.window.activeTextEditor
+      ? vscode.window.activeTextEditor.viewColumn
+      : undefined;
+
+    // If we already have a panel, show it
+    if (CodeLineChatPanel.currentPanel) {
+      CodeLineChatPanel.currentPanel.panel.reveal(column);
+      return;
+    }
+
+    // Otherwise, create a new panel
+    const panel = vscode.window.createWebviewPanel(
+      'codelineChat',
+      'CodeLine Chat',
+      column || vscode.ViewColumn.One,
+      {
+        enableScripts: true,
+        retainContextWhenHidden: true,
+        localResourceRoots: []
+      }
+    );
+
+    CodeLineChatPanel.currentPanel = new CodeLineChatPanel(panel, context, extension);
+  }
+
+  private constructor(
+    panel: vscode.WebviewPanel,
+    context: vscode.ExtensionContext,
+    extension: CodeLineExtension
+  ) {
+    this.panel = panel;
+    this.context = context;
+    this.extension = extension;
+
+    // Set the webview's initial html content
+    this.updateWebview();
+
+    // Listen for when the panel is disposed
+    this.panel.onDidDispose(() => this.dispose(), null, this.context.subscriptions);
+
+    // Handle messages from the webview
+    this.panel.webview.onDidReceiveMessage(
+      async (message) => {
+        await this.handleWebviewMessage(message);
+      },
+      null,
+      this.context.subscriptions
+    );
+  }
+
+  public async show() {
+    CodeLineChatPanel.createOrShow(this.context, this.extension);
+  }
+
+  private async handleWebviewMessage(message: any) {
+    console.log('Received message from webview:', message);
+    
+    switch (message.command) {
+      case 'sendMessage':
+        await this.handleUserMessage(message.text);
+        break;
+      case 'executeTask':
+        await this.handleTaskExecution(message.task);
+        break;
+      case 'clearChat':
+        this.messages = [];
+        this.updateWebview();
+        break;
+      case 'getHistory':
+        this.sendMessageToWebview('history', { messages: this.messages });
+        break;
+      case 'openSettings':
+        vscode.commands.executeCommand('codeline.openSettings');
+        break;
+      case 'switchView':
+        this.currentView = message.view;
+        this.updateWebview();
+        break;
+      case 'saveSettings':
+        await this.handleSaveSettings(message.config);
+        break;
+      case 'testConnection':
+        await this.handleTestConnection();
+        break;
+      case 'approveDiff':
+        await this.handleApproveDiff(message.filePath, message.diffId, message.action);
+        break;
+      case 'resetSettings':
+        await this.handleResetSettings();
+        break;
+      case 'fileCommand':
+        await this.handleFileCommand(message.fileCommand, message.data);
+        break;
+    }
+  }
+
+  private async handleSaveSettings(config: any) {
+    try {
+      // Update configuration
+      this.extension.updateConfig(config);
+      
+      // Show success message
+      vscode.window.showInformationMessage('CodeLine settings saved successfully');
+      
+      // Update webview with new config
+      this.sendMessageToWebview('configUpdated', { config });
+      this.updateWebview();
+    } catch (error: any) {
+      vscode.window.showErrorMessage(`Failed to save settings: ${error.message}`);
+    }
+  }
+
+  private async handleTestConnection() {
+    try {
+      // Test the connection by getting model info
+      const modelInfo = this.extension.getModelInfo();
+      
+      if (modelInfo === 'Not configured') {
+        vscode.window.showWarningMessage('CodeLine is not configured. Please set your API key first.');
+      } else {
+        vscode.window.showInformationMessage(`Connection test successful! Model: ${modelInfo}`);
+      }
+    } catch (error: any) {
+      vscode.window.showErrorMessage(`Connection test failed: ${error.message}`);
+    }
+  }
+
+  private async handleResetSettings() {
+    try {
+      // Reset to default configuration
+      const defaultConfig = {
+        apiKey: '',
+        model: 'deepseek-chat',
+        baseUrl: 'https://api.deepseek.com',
+        temperature: 0.7,
+        maxTokens: 2048,
+        autoAnalyze: false,
+        showExamples: true,
+        typingIndicator: true
+      };
+      
+      this.extension.updateConfig(defaultConfig);
+      
+      // Show success message
+      vscode.window.showInformationMessage('CodeLine settings reset to defaults');
+      
+      // Update webview with new config
+      this.sendMessageToWebview('configUpdated', { config: defaultConfig });
+      this.updateWebview();
+    } catch (error: any) {
+      vscode.window.showErrorMessage(`Failed to reset settings: ${error.message}`);
+    }
+  }
+
+  private async handleApproveDiff(filePath: string, diffId: string, action: 'approve' | 'reject') {
+    try {
+      // 调用扩展的批准/拒绝方法
+      const result = await this.extension.approveFileDiff(diffId, action);
+      
+      if (result.success) {
+        const message = action === 'approve' ? 
+          `✓ Approved changes for: ${filePath}` : 
+          `✗ Rejected changes for: ${filePath}`;
+        
+        vscode.window.showInformationMessage(message, 'View Details').then(selection => {
+          if (selection === 'View Details') {
+            // 可以在输出面板显示操作详情
+            const outputChannel = vscode.window.createOutputChannel('CodeLine File Operations');
+            outputChannel.show(true);
+            outputChannel.appendLine(`File: ${filePath}`);
+            outputChannel.appendLine(`Action: ${action === 'approve' ? 'Approved' : 'Rejected'}`);
+            outputChannel.appendLine(`Result: ${result.message}`);
+          }
+        });
+      } else {
+        vscode.window.showErrorMessage(`Failed to ${action} changes: ${result.error || 'Unknown error'}`);
+      }
+      
+      // 更新UI状态
+      this.sendMessageToWebview('diffActionResult', {
+        filePath,
+        diffId,
+        action,
+        success: result.success,
+        message: result.message,
+        error: result.error
+      });
+      
+    } catch (error: any) {
+      vscode.window.showErrorMessage(`Failed to ${action} changes: ${error.message}`);
+      
+      this.sendMessageToWebview('diffActionResult', {
+        filePath,
+        diffId,
+        action,
+        success: false,
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * 添加助手消息到聊天
+   */
+  private addAssistantMessage(content: string): void {
+    const assistantMessage: ChatMessage = {
+      id: Date.now().toString(),
+      role: 'assistant',
+      content: content,
+      timestamp: new Date()
+    };
+    this.messages.push(assistantMessage);
+    this.updateWebview();
+  }
+
+  /**
+   * 格式化文件命令结果为可读消息
+   */
+  private formatFileCommandResult(command: string, result: any): string {
+    if (!result.success) {
+      return `❌ File command "${command}" failed: ${result.message || result.error || 'Unknown error'}`;
+    }
+
+    switch (command) {
+      case 'listFiles':
+        const listData = result.data;
+        let listMessage = `📁 **Directory Listing** (${listData.path || 'current directory'})\n\n`;
+        listMessage += `📂 Directories: ${listData.directories}\n`;
+        listMessage += `📄 Files: ${listData.filesCount}\n`;
+        listMessage += `📊 Total Size: ${this.formatFileSize(listData.totalSize)}\n\n`;
+        
+        if (listData.files && listData.files.length > 0) {
+          listMessage += `**Contents**:\n`;
+          listData.files.forEach((file: any, index: number) => {
+            if (index < 10) { // 只显示前10个
+              const icon = file.type === 'directory' ? '📁' : '📄';
+              const size = file.type === 'directory' ? '' : ` (${this.formatFileSize(file.size)})`;
+              const ext = file.extension ? ` ${file.extension}` : '';
+              listMessage += `${icon} **${file.name}**${ext}${size}\n`;
+            }
+          });
+          if (listData.files.length > 10) {
+            listMessage += `... and ${listData.files.length - 10} more items\n`;
+          }
+        } else {
+          listMessage += `*Directory is empty*\n`;
+        }
+        return listMessage;
+
+      case 'searchFiles':
+        const searchData = result.data;
+        let searchMessage = `🔍 **File Search Results**\n\n`;
+        searchMessage += `📊 Found: ${searchData.length} files\n\n`;
+        
+        if (searchData.length > 0) {
+          searchMessage += `**Top Results**:\n`;
+          searchData.slice(0, 5).forEach((file: any, index: number) => {
+            searchMessage += `${index + 1}. **${file.name}** (${file.path})\n`;
+            if (file.matches && file.matches.length > 0) {
+              searchMessage += `   Matches: ${file.matches.length} content matches\n`;
+            }
+          });
+          if (searchData.length > 5) {
+            searchMessage += `... and ${searchData.length - 5} more files\n`;
+          }
+        } else {
+          searchMessage += `*No files found matching search criteria*\n`;
+        }
+        return searchMessage;
+
+      case 'getStats':
+        const statsData = result.data;
+        let statsMessage = `📊 **Workspace Statistics**\n\n`;
+        statsMessage += `📂 Total Files: ${statsData.totalFiles}\n`;
+        statsMessage += `📝 Total Lines: ${statsData.totalLines}\n`;
+        statsMessage += `💾 Total Size: ${this.formatFileSize(statsData.totalSize)}\n\n`;
+        
+        statsMessage += `**File Types**:\n`;
+        Object.entries(statsData.byType).forEach(([type, count]: [string, any]) => {
+          const icon = type === 'directory' ? '📁' : type === 'file' ? '📄' : '🔗';
+          statsMessage += `${icon} ${type}: ${count}\n`;
+        });
+        
+        if (Object.keys(statsData.byExtension).length > 0) {
+          statsMessage += `\n**Extensions**:\n`;
+          const topExtensions = Object.entries(statsData.byExtension)
+            .sort((a: [string, any], b: [string, any]) => b[1].count - a[1].count)
+            .slice(0, 5);
+          
+          topExtensions.forEach(([ext, data]: [string, any]) => {
+            statsMessage += `${ext}: ${data.count} files, ${data.lines} lines\n`;
+          });
+        }
+        return statsMessage;
+
+      case 'browseDirectory':
+        const browseData = result.data;
+        let browseMessage = `📂 **Directory Browser**\n\n`;
+        browseMessage += `📁 Selected: ${result.path || 'current directory'}\n`;
+        browseMessage += `📊 Items: ${browseData.files?.length || 0}\n\n`;
+        
+        if (browseData.files && browseData.files.length > 0) {
+          browseMessage += `**Contents**:\n`;
+          browseData.files.slice(0, 8).forEach((file: any) => {
+            const icon = file.type === 'directory' ? '📁' : '📄';
+            browseMessage += `${icon} ${file.name}\n`;
+          });
+          if (browseData.files.length > 8) {
+            browseMessage += `... and ${browseData.files.length - 8} more items\n`;
+          }
+        }
+        return browseMessage;
+
+      default:
+        return `✅ File operation "${command}" completed: ${result.message}`;
+    }
+  }
+
+  /**
+   * 格式化文件大小（B, KB, MB, GB）
+   */
+  private formatFileSize(bytes: number): string {
+    if (bytes === 0) return '0 B';
+    
+    const units = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(1024));
+    return `${(bytes / Math.pow(1024, i)).toFixed(2)} ${units[i]}`;
+  }
+
+  private async handleUserMessage(text: string) {
+    if (this.isProcessing) {
+      return;
+    }
+
+    this.isProcessing = true;
+    
+    try {
+      // Add user message
+      const userMessage: ChatMessage = {
+        id: Date.now().toString(),
+        role: 'user',
+        content: text,
+        timestamp: new Date()
+      };
+      this.messages.push(userMessage);
+      this.updateWebview();
+
+      // Show typing indicator
+      this.sendMessageToWebview('typing', { isTyping: true });
+
+      // Process the message using the new TaskEngine
+      const taskResult = await this.extension.executeTask(text);
+      
+      // 构建响应消息
+      let responseContent = '';
+      
+      if (taskResult && 'success' in taskResult) {
+        // 新的TaskResult格式
+        if (taskResult.success) {
+          const completedSteps = taskResult.steps?.filter((s: any) => s.status === 'completed').length || 0;
+          const totalSteps = taskResult.steps?.length || 0;
+          
+          responseContent = `✅ Task completed successfully!\n\n`;
+          responseContent += `**Summary**: ${completedSteps}/${totalSteps} steps executed\n\n`;
+          
+          if (taskResult.output) {
+            responseContent += `**Output**:\n${taskResult.output.substring(0, 500)}`;
+            if (taskResult.output.length > 500) {
+              responseContent += '...\n*(output truncated)*';
+            }
+          }
+          
+          // 显示步骤摘要
+          if (taskResult.steps && taskResult.steps.length > 0) {
+            responseContent += `\n\n**Steps**:\n`;
+            taskResult.steps.forEach((step: any, index: number) => {
+              const statusIcon = step.status === 'completed' ? '✓' :
+                                step.status === 'failed' ? '✗' :
+                                step.status === 'executing' ? '⟳' : '⏸';
+              responseContent += `${index + 1}. ${statusIcon} ${step.type}: ${step.description}\n`;
+            });
+          }
+        } else {
+          responseContent = `❌ Task failed: ${taskResult.error || 'Unknown error'}\n\n`;
+          if (taskResult.output) {
+            responseContent += `**Error Details**:\n${taskResult.output}`;
+          }
+        }
+      } else {
+        // 向后兼容：旧的响应格式
+        const oldResponse = taskResult as any;
+        responseContent = oldResponse.content || 'I processed your request.';
+      }
+      
+      // Add assistant response
+      const assistantMessage: ChatMessage = {
+        id: (Date.now() + 1).toString(),
+        role: 'assistant',
+        content: responseContent,
+        timestamp: new Date()
+      };
+      this.messages.push(assistantMessage);
+      
+      // Hide typing indicator
+      this.sendMessageToWebview('typing', { isTyping: false });
+      this.updateWebview();
+      
+    } catch (error: any) {
+      console.error('Error processing message:', error);
+      
+      // Add error message
+      const errorMessage: ChatMessage = {
+        id: Date.now().toString(),
+        role: 'system',
+        content: `Error: ${error.message}`,
+        timestamp: new Date()
+      };
+      this.messages.push(errorMessage);
+      
+      this.sendMessageToWebview('typing', { isTyping: false });
+      this.updateWebview();
+      
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
+  private async handleTaskExecution(task: string) {
+    try {
+      const result = await this.extension.executeTask(task);
+      this.sendMessageToWebview('taskResult', { result });
+    } catch (error: any) {
+      this.sendMessageToWebview('taskError', { error: error.message });
+    }
+  }
+
+  private async handleFileCommand(command: string, data?: any) {
+    try {
+      const result = await this.extension.executeFileCommand(command, data);
+      this.sendMessageToWebview('fileCommandResult', { command, result });
+      
+      // 同时将结果显示为聊天消息
+      this.addAssistantMessage(this.formatFileCommandResult(command, result));
+    } catch (error: any) {
+      this.sendMessageToWebview('fileCommandError', { command, error: error.message });
+      this.addAssistantMessage(`File command "${command}" failed: ${error.message}`);
+    }
+  }
+
+  private sendMessageToWebview(command: string, data: any) {
+    this.panel.webview.postMessage({ command, ...data });
+  }
+
+  private updateWebview() {
+    this.panel.webview.html = this.getWebviewContent();
+    // Send model info to webview
+    const modelInfo = this.extension.getModelInfo();
+    this.sendMessageToWebview('modelInfo', { modelInfo });
+  }
+
+  private getWebviewContent(): string {
+    const config = this.extension.getConfig();
+    
+    // Messages HTML for chat display
+    const messagesHtml = this.messages.map(msg => `
+      <div class="message ${msg.role}">
+        <div class="message-header">
+          <span class="role">${msg.role}</span>
+          <span class="time">${msg.timestamp.toLocaleTimeString()}</span>
+        </div>
+        <div class="message-content">
+          ${this.escapeHtml(msg.content)}
+        </div>
+      </div>
+    `).join('');
+
+    // Recent tasks HTML (last 3 messages)
+    const recentTasks = this.messages.slice(-3).reverse();
+    const recentTasksHtml = recentTasks.length > 0 ? recentTasks.map((msg, index) => `
+      <div class="recent-task" data-id="${msg.id}">
+        <div class="recent-task-preview">
+          ${msg.content.substring(0, 80)}${msg.content.length > 80 ? '...' : ''}
+        </div>
+        <div class="recent-task-meta">
+          <span class="recent-task-role">${msg.role}</span>
+          <span class="recent-task-time">${msg.timestamp.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+        </div>
+      </div>
+    `).join('') : `
+      <div class="no-recent-tasks">
+        No recent tasks. Start a new conversation!
+      </div>
+    `;
+
+    // Settings panel HTML (hidden by default)
+    const settingsPanelHtml = `
+      <div class="settings-panel" id="settingsPanel" style="display: none;">
+        <div class="settings-header">
+          <button class="settings-back-btn" onclick="closeSettingsPanel()">← Back</button>
+          <h3>Settings</h3>
+        </div>
+        
+        <div class="settings-content">
+          <div class="settings-section">
+            <h4>API Configuration</h4>
+            
+            <div class="form-group">
+              <label for="apiKey">API Key</label>
+              <input type="password" id="apiKey" value="${config.apiKey || ''}" placeholder="Enter your API key">
+              <div class="help-text">Your API key for AI services</div>
+            </div>
+            
+            <div class="form-group">
+              <label for="model">Default Model</label>
+              <select id="model">
+                <option value="deepseek-chat" ${config.model === 'deepseek-chat' ? 'selected' : ''}>DeepSeek Chat</option>
+                <option value="claude-3-sonnet" ${config.model === 'claude-3-sonnet' ? 'selected' : ''}>Claude 3 Sonnet</option>
+                <option value="gpt-4" ${config.model === 'gpt-4' ? 'selected' : ''}>GPT-4</option>
+                <option value="qwen-max" ${config.model === 'qwen-max' ? 'selected' : ''}>Qwen Max</option>
+              </select>
+            </div>
+            
+            <div class="form-group">
+              <label for="baseUrl">API Base URL</label>
+              <input type="text" id="baseUrl" value="${config.baseUrl || ''}" placeholder="https://api.deepseek.com">
+            </div>
+          </div>
+          
+          <div class="settings-section">
+            <h4>Features</h4>
+            
+            <div class="form-group checkbox">
+              <input type="checkbox" id="autoAnalyze" ${config.autoAnalyze ? 'checked' : ''}>
+              <label for="autoAnalyze">Auto-analyze project on startup</label>
+            </div>
+            
+            <div class="form-group checkbox">
+              <input type="checkbox" id="showExamples" ${config.showExamples !== false ? 'checked' : ''}>
+              <label for="showExamples">Show example tasks</label>
+            </div>
+          </div>
+          
+          <div class="settings-actions">
+            <button id="saveSettings" class="primary">Save Settings</button>
+            <button id="resetSettings">Reset to Defaults</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // MCP settings panel HTML
+    const mcpSettingsPanelHtml = `
+      <div class="settings-panel" id="mcpSettingsPanel" style="display: none;">
+        <div class="settings-header">
+          <button class="settings-back-btn" onclick="closeMCPSettingsPanel()">← Back</button>
+          <h3>MCP Servers</h3>
+        </div>
+        
+        <div class="settings-content">
+          <div class="settings-section">
+            <h4>Configure MCP Servers</h4>
+            <div class="mcp-server-list" id="mcpServerList">
+              <div class="no-mcp-servers">
+                No MCP servers configured.
+              </div>
+            </div>
+            
+            <div class="form-group">
+              <button id="addMCPBtn">Add MCP Server</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // History detail panel HTML
+    const historyPanelHtml = `
+      <div class="settings-panel" id="historyPanel" style="display: none;">
+        <div class="settings-header">
+          <button class="settings-back-btn" onclick="closeHistoryPanel()">← Back</button>
+          <h3>History</h3>
+        </div>
+        
+        <div class="settings-content">
+          <div class="history-list">
+            ${this.messages.length > 0 ? `
+              <div class="history-items">
+                ${this.messages.map((msg, index) => `
+                  <div class="history-item" data-index="${index}">
+                    <div class="history-item-header">
+                      <span class="role">${msg.role}</span>
+                      <span class="time">${msg.timestamp.toLocaleString()}</span>
+                    </div>
+                    <div class="history-item-content">
+                      ${msg.content.substring(0, 150)}${msg.content.length > 150 ? '...' : ''}
+                    </div>
+                  </div>
+                `).join('')}
+              </div>
+            ` : `
+              <div class="empty-state">
+                <p>No conversation history yet.</p>
+              </div>
+            `}
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Auto-approve settings panel
+    const autoApprovePanelHtml = `
+      <div class="settings-panel" id="autoApprovePanel" style="display: none;">
+        <div class="settings-header">
+          <button class="settings-back-btn" onclick="closeAutoApprovePanel()">← Back</button>
+          <h3>Auto-approve Settings</h3>
+        </div>
+        
+        <div class="settings-content">
+          <div class="settings-section">
+            <h4>File Operations Permissions</h4>
+            
+            <div class="form-group checkbox">
+              <input type="checkbox" id="autoApproveCreate" ${config.autoApproveCreate ? 'checked' : ''}>
+              <label for="autoApproveCreate">Auto-approve file creation</label>
+            </div>
+            
+            <div class="form-group checkbox">
+              <input type="checkbox" id="autoApproveEdit" ${config.autoApproveEdit ? 'checked' : ''}>
+              <label for="autoApproveEdit">Auto-approve file edits</label>
+            </div>
+            
+            <div class="form-group checkbox">
+              <input type="checkbox" id="autoApproveDelete" ${config.autoApproveDelete ? 'checked' : ''}>
+              <label for="autoApproveDelete">Auto-approve file deletion</label>
+            </div>
+            
+            <div class="form-group">
+              <label for="autoApproveDelay">Auto-approve delay (seconds)</label>
+              <input type="number" id="autoApproveDelay" value="${config.autoApproveDelay || 5}" min="0" max="60">
+              <div class="help-text">Delay before auto-approving operations (0 = immediate)</div>
+            </div>
+          </div>
+          
+          <div class="settings-actions">
+            <button id="saveAutoApproveSettings" class="primary">Save Settings</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Define view HTML variables
+    const historyHtml = historyPanelHtml;
+    const settingsHtml = settingsPanelHtml;
+
+    return `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>CodeLine - AI Coding Assistant</title>
+        <style>
+          /* Cline Style - CodeLine复刻 */
+          * {
+            box-sizing: border-box;
+          }
+          
+          body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #0d1117; /* GitHub深色主题背景 */
+            color: #c9d1d9;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+          }
+          
+          /* Navigation - Cline Style */
+          .nav {
+            display: flex;
+            background: #161b22; /* GitHub dark theme navigation background */
+            border-bottom: 1px solid #3e3e42;
+            padding: 0 16px;
+            height: 48px;
+            align-items: center;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
+          }
+          
+          .nav-item {
+            padding: 8px 16px;
+            background: none;
+            border: none;
+            color: #c9d1d9; /* GitHub dark theme text color */
+            font-size: 13px;
+            cursor: pointer;
+            border-radius: 6px; /* Increased roundness */
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: background-color 0.2s, color 0.2s;
+          }
+          
+          .nav-item:hover {
+            background: #2a2d2e;
+          }
+          
+          .nav-item.active {
+            color: #ffffff;
+            background: #2a2d2e;
+          }
+          
+          .nav-icon {
+            font-size: 14px;
+          }
+          
+          .nav-spacer {
+            flex: 1;
+          }
+          
+          .model-info {
+            padding: 8px 12px;
+            font-size: 11px;
+            color: #4ec9b0;
+            background: #2a2d2e;
+            border-radius: 6px; /* Increased roundness */
+            border: 1px solid #3e3e42;
+            box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.2);
+          }
+          
+          /* Main content */
+          .main-content {
+            flex: 1;
+            overflow: auto;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+          }
+          
+          /* Chat view */
+          .chat-view {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+          }
+          
+          .chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            padding-bottom: 0;
+          }
+          
+          .message {
+            margin-bottom: 20px;
+            padding: 16px;
+            border-radius: 12px; /* Increased roundness */
+            background: #252526;
+            border-left: 4px solid transparent;
+            max-width: 85%;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2); /* Subtle shadow */
+          }
+          
+          .message.user {
+            border-left-color: #007acc;
+            background: #2d2d30;
+            margin-left: auto;
+            box-shadow: 0 2px 8px rgba(0, 122, 204, 0.2); /* Blue tint shadow */
+          }
+          
+          .message.assistant {
+            border-left-color: #4ec9b0;
+            margin-right: auto;
+            box-shadow: 0 2px 8px rgba(78, 201, 176, 0.2); /* Green tint shadow */
+          }
+          
+          .message.system {
+            border-left-color: #f44747;
+            background: #3a3a3a;
+            margin-left: auto;
+            margin-right: auto;
+            max-width: 90%;
+            box-shadow: 0 2px 8px rgba(244, 71, 71, 0.2); /* Red tint shadow */
+          }
+          
+          .message-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 12px;
+            opacity: 0.8;
+          }
+          
+          .message-content {
+            white-space: pre-wrap;
+            line-height: 1.5;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 14px;
+          }
+          
+          .message-content code {
+            background: #2d2d30;
+            padding: 2px 4px;
+            border-radius: 3px;
+            font-family: 'Consolas', 'Monaco', monospace;
+          }
+          
+          .message-content pre {
+            background: #2d2d30;
+            padding: 12px;
+            border-radius: 8px; /* Increased roundness */
+            overflow-x: auto;
+            margin: 8px 0;
+            border: 1px solid #3e3e42;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+          }
+          
+          .message-content pre code {
+            background: none;
+            padding: 0;
+          }
+          
+          .chat-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 0 20px;
+            padding-top: 20px;
+            border-bottom: 1px solid #3e3e42;
+            padding-bottom: 20px;
+          }
+          
+          .chat-controls button {
+            background: linear-gradient(135deg, #3e3e42 0%, #4a4a4e 100%);
+            color: #d4d4d4;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px; /* Increased roundness */
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+          }
+          
+          .chat-controls button:hover {
+            background: linear-gradient(135deg, #4a4a4e 0%, #56565a 100%);
+            transform: translateY(-1px);
+          }
+          
+          .file-controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding: 0 20px;
+            padding-top: 10px;
+            flex-wrap: wrap;
+          }
+          
+          .file-controls button {
+            background: linear-gradient(135deg, #0d3c61 0%, #1a4f7a 100%);
+            color: #d4d4d4;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+          }
+          
+          .file-controls button:hover {
+            background: linear-gradient(135deg, #1a4f7a 0%, #256a9a 100%);
+            transform: translateY(-1px);
+          }
+          
+          .input-container {
+            display: flex;
+            gap: 12px;
+            padding: 20px;
+            border-top: 1px solid #3e3e42;
+            background: #252526;
+          }
+          
+          textarea {
+            flex: 1;
+            padding: 12px;
+            border: 1px solid #3e3e42;
+            border-radius: 8px; /* Increased roundness */
+            background: #1e1e1e;
+            color: #d4d4d4;
+            font-family: inherit;
+            font-size: 14px;
+            resize: none;
+            min-height: 60px;
+            transition: border-color 0.2s;
+          }
+          
+          textarea:focus {
+            outline: none;
+            border-color: #007acc;
+          }
+          
+          #sendButton {
+            padding: 12px 24px;
+            background: #007acc;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 500;
+            align-self: flex-end;
+          }
+          
+          #sendButton:hover {
+            background: #0062a3;
+          }
+          
+          #sendButton:disabled {
+            background: #3e3e42;
+            cursor: not-allowed;
+          }
+          
+          .typing-indicator {
+            display: none;
+            padding: 10px;
+            color: #4ec9b0;
+            font-style: italic;
+            text-align: center;
+          }
+          
+          .typing-indicator.active {
+            display: block;
+          }
+          
+          .typing-indicator::after {
+            content: '...';
+            animation: dots 1.5s infinite;
+          }
+          
+          @keyframes dots {
+            0%, 20% { content: '.'; }
+            40% { content: '..'; }
+            60%, 100% { content: '...'; }
+          }
+          
+          /* Settings view */
+          .settings-container {
+            max-width: 600px;
+            margin: 0 auto;
+            padding: 20px;
+          }
+          
+          .settings-container h2 {
+            margin-top: 0;
+            color: #4ec9b0;
+          }
+          
+          .settings-section {
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid #3e3e42;
+          }
+          
+          .settings-section h3 {
+            color: #d4d4d4;
+            margin-bottom: 16px;
+            font-size: 16px;
+          }
+          
+          .form-group {
+            margin-bottom: 20px;
+          }
+          
+          .form-group label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 14px;
+            color: #cccccc;
+          }
+          
+          .form-group input[type="text"],
+          .form-group input[type="password"],
+          .form-group input[type="number"],
+          .form-group select {
+            width: 100%;
+            padding: 10px;
+            background: #252526;
+            border: 1px solid #3e3e42;
+            border-radius: 4px;
+            color: #d4d4d4;
+            font-size: 14px;
+          }
+          
+          .form-group input[type="range"] {
+            width: 200px;
+            margin-right: 10px;
+          }
+          
+          .help-text {
+            font-size: 12px;
+            color: #858585;
+            margin-top: 4px;
+          }
+          
+          .checkbox {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+          }
+          
+          .checkbox input[type="checkbox"] {
+            width: auto;
+          }
+          
+          .checkbox label {
+            margin-bottom: 0;
+          }
+          
+          .settings-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 30px;
+          }
+          
+          .settings-actions button {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+          }
+          
+          .settings-actions .primary {
+            background: #007acc;
+            color: white;
+          }
+          
+          .settings-actions .primary:hover {
+            background: #0062a3;
+          }
+          
+          .settings-actions button:not(.primary) {
+            background: #3e3e42;
+            color: #d4d4d4;
+          }
+          
+          .settings-actions button:not(.primary):hover {
+            background: #4e4e52;
+          }
+          
+          /* History view */
+          .history-container {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+          }
+          
+          .history-container h2 {
+            margin-top: 0;
+            color: #4ec9b0;
+          }
+          
+          .history-item {
+            padding: 15px;
+            background: #252526;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            border-left: 4px solid transparent;
+            cursor: pointer;
+          }
+          
+          .history-item:hover {
+            background: #2d2d30;
+          }
+          
+          .history-item.user {
+            border-left-color: #007acc;
+          }
+          
+          .history-item.assistant {
+            border-left-color: #4ec9b0;
+          }
+          
+          .history-item.system {
+            border-left-color: #f44747;
+          }
+          
+          .history-item-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+            font-size: 12px;
+            opacity: 0.8;
+          }
+          
+          .history-item-content {
+            font-size: 14px;
+            line-height: 1.4;
+          }
+          
+          .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #858585;
+          }
+          
+          /* View management */
+          .view {
+            display: none;
+            height: 100%;
+          }
+          
+          .view.active {
+            display: flex;
+            flex-direction: column;
+          }
+          
+          /* Scrollbar styling */
+          ::-webkit-scrollbar {
+            width: 10px;
+          }
+          
+          ::-webkit-scrollbar-track {
+            background: #1e1e1e;
+          }
+          
+          ::-webkit-scrollbar-thumb {
+            background: #424242;
+            border-radius: 5px;
+          }
+          
+          ::-webkit-scrollbar-thumb:hover {
+            background: #555555;
+          }
+          
+          /* Cline-style Diff View Styles */
+          .diff-container {
+            margin: 12px 0;
+            border: 1px solid #3e3e42;
+            border-radius: 8px;
+            overflow: hidden;
+            background: #1e1e1e;
+          }
+          
+          .diff-header {
+            padding: 12px 16px;
+            background: #252526;
+            border-bottom: 1px solid #3e3e42;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }
+          
+          .diff-header h3 {
+            margin: 0;
+            font-size: 14px;
+            font-weight: 500;
+            color: #d4d4d4;
+            font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+          }
+          
+          .diff-summary {
+            font-size: 12px;
+            color: #858585;
+            margin-top: 4px;
+          }
+          
+          .diff-actions {
+            display: flex;
+            gap: 8px;
+          }
+          
+          .diff-action-btn {
+            padding: 6px 12px;
+            border: none;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background-color 0.2s;
+          }
+          
+          .diff-approve {
+            background: #2d7d46;
+            color: white;
+          }
+          
+          .diff-approve:hover {
+            background: #236b3a;
+          }
+          
+          .diff-reject {
+            background: #c42b1c;
+            color: white;
+          }
+          
+          .diff-reject:hover {
+            background: #a82316;
+          }
+          
+          .diff-review {
+            background: #007acc;
+            color: white;
+          }
+          
+          .diff-review:hover {
+            background: #0062a3;
+          }
+          
+          .diff-content {
+            padding: 8px 0;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+            line-height: 1.4;
+            max-height: 300px;
+            overflow-y: auto;
+          }
+          
+          .diff-line {
+            padding: 2px 12px;
+            display: flex;
+            min-height: 20px;
+            align-items: center;
+            border-left: 4px solid transparent;
+          }
+          
+          .diff-line:hover {
+            background: #2d2d30;
+          }
+          
+          .diff-line-info {
+            width: 100px;
+            min-width: 100px;
+            color: #858585;
+            font-size: 11px;
+            text-align: right;
+            padding-right: 12px;
+            user-select: none;
+          }
+          
+          .diff-line-content {
+            flex: 1;
+            white-space: pre;
+            overflow-x: auto;
+          }
+          
+          .diff-added {
+            border-left-color: #2d7d46;
+            background: rgba(45, 125, 70, 0.1);
+          }
+          
+          .diff-removed {
+            border-left-color: #c42b1c;
+            background: rgba(196, 43, 28, 0.1);
+          }
+          
+          .diff-modified {
+            border-left-color: #d19a66;
+            background: rgba(209, 154, 102, 0.1);
+          }
+          
+          /* Collapsible diff */
+          .diff-collapsible {
+            cursor: pointer;
+          }
+          
+          .diff-collapsible-header {
+            padding: 8px 16px;
+            background: #2d2d30;
+            border-bottom: 1px solid #3e3e42;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }
+          
+          .diff-collapsible-header:hover {
+            background: #37373a;
+          }
+          
+          .diff-collapsible-content {
+            display: none;
+          }
+          
+          .diff-collapsible.expanded .diff-collapsible-content {
+            display: block;
+          }
+          
+          .diff-icon {
+            margin-right: 8px;
+            font-size: 12px;
+          }
+          
+          /* Terminal result styles (Cline风格) */
+          .terminal-result {
+            border: 1px solid #3e3e42;
+            border-radius: 8px;
+            margin: 16px 0;
+            background: #252526;
+            overflow: hidden;
+            font-family: 'SF Mono', 'Consolas', 'Monaco', 'Courier New', monospace;
+          }
+          
+          .terminal-result.terminal-success {
+            border-left: 4px solid #30d158;
+          }
+          
+          .terminal-result.terminal-error {
+            border-left: 4px solid #ff453a;
+          }
+          
+          .terminal-header {
+            padding: 12px 16px;
+            background: #2d2d30;
+            border-bottom: 1px solid #3e3e42;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+          }
+          
+          .terminal-header h3 {
+            margin: 0;
+            font-size: 14px;
+            color: #d4d4d4;
+            font-weight: 500;
+          }
+          
+          .terminal-meta {
+            font-size: 11px;
+            color: #cccccc;
+            display: flex;
+            gap: 12px;
+          }
+          
+          .terminal-meta span {
+            padding: 2px 6px;
+            background: #3e3e42;
+            border-radius: 3px;
+          }
+          
+          .terminal-command {
+            padding: 12px 16px;
+            background: #1e1e1e;
+            border-bottom: 1px solid #3e3e42;
+            font-size: 13px;
+          }
+          
+          .terminal-command code {
+            color: #4ec9b0;
+            font-weight: 600;
+          }
+          
+          .terminal-output {
+            padding: 16px;
+            max-height: 300px;
+            overflow-y: auto;
+            background: #1e1e1e;
+          }
+          
+          .terminal-output pre {
+            margin: 0;
+            font-size: 12px;
+            color: #d4d4d4;
+            white-space: pre-wrap;
+            word-break: break-all;
+            line-height: 1.4;
+          }
+          
+          .terminal-error-output {
+            padding: 12px 16px;
+            background: rgba(255, 69, 58, 0.1);
+            border-top: 1px solid rgba(255, 69, 58, 0.3);
+          }
+          
+          .terminal-error-output h4 {
+            margin: 0 0 8px 0;
+            color: #ff453a;
+            font-size: 12px;
+            font-weight: 600;
+          }
+          
+          .terminal-error-output pre {
+            margin: 0;
+            font-size: 12px;
+            color: #ff453a;
+            white-space: pre-wrap;
+          }
+          
+          .terminal-analysis {
+            padding: 12px 16px;
+            background: #2d2d30;
+            border-top: 1px solid #3e3e42;
+            font-size: 12px;
+          }
+          
+          .terminal-analysis h4 {
+            margin: 0 0 8px 0;
+            color: #cccccc;
+            font-weight: 600;
+          }
+          
+          .terminal-analysis ul {
+            margin: 0;
+            padding-left: 16px;
+            color: #a5a5a5;
+          }
+          
+          .terminal-analysis li {
+            margin-bottom: 4px;
+          }
+          
+          /* Terminal controls for active commands */
+          .terminal-controls {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 12px;
+            padding: 8px;
+            background: #2d2d30;
+            border-radius: 6px;
+            border: 1px solid #3e3e42;
+          }
+          
+          .terminal-control-btn {
+            padding: 6px 12px;
+            background: #007acc;
+            border: none;
+            border-radius: 4px;
+            color: white;
+            font-size: 12px;
+            cursor: pointer;
+            font-weight: 500;
+            transition: background 0.2s;
+          }
+          
+          .terminal-control-btn:hover {
+            background: #0e639c;
+          }
+          
+          .terminal-control-btn.stop {
+            background: #ff453a;
+          }
+          
+          .terminal-control-btn.stop:hover {
+            background: #e53935;
+          }
+          
+          /* Real-time output animation */
+          .terminal-live-output {
+            border: 1px solid #3e3e42;
+            border-radius: 6px;
+            margin: 12px 0;
+            background: #1e1e1e;
+            max-height: 200px;
+            overflow-y: auto;
+            padding: 12px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 12px;
+          }
+          
+          .terminal-live-output .line {
+            padding: 2px 0;
+            color: #d4d4d4;
+            white-space: pre-wrap;
+            animation: fadeIn 0.3s ease-out;
+          }
+          
+          @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(2px); }
+            to { opacity: 1; transform: translateY(0); }
+          }
+          
+          /* Command history */
+          .terminal-history {
+            margin-top: 16px;
+            border-top: 1px solid #3e3e42;
+            padding-top: 12px;
+          }
+          
+          .terminal-history h4 {
+            margin: 0 0 8px 0;
+            color: #cccccc;
+            font-size: 12px;
+            font-weight: 600;
+          }
+          
+          .terminal-history-list {
+            max-height: 150px;
+            overflow-y: auto;
+            background: #1e1e1e;
+            border-radius: 4px;
+            padding: 8px;
+          }
+          
+          .terminal-history-item {
+            padding: 6px 8px;
+            border-bottom: 1px solid #2d2d30;
+            font-size: 11px;
+            color: #a5a5a5;
+            cursor: pointer;
+            transition: background 0.2s;
+          }
+          
+          .terminal-history-item:hover {
+            background: #2d2d30;
+          }
+          
+          .terminal-history-item:last-child {
+            border-bottom: none;
+          }
+          
+          .terminal-history-item.success code {
+            color: #30d158;
+          }
+          
+          .terminal-history-item.error code {
+            color: #ff453a;
+          }
+          
+          /* File operation status */
+          .file-status {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 11px;
+            font-weight: 500;
+            margin-left: 8px;
+          }
+          
+          .file-status-created {
+            background: rgba(45, 125, 70, 0.2);
+            color: #4ec9b0;
+          }
+          
+          .file-status-modified {
+            background: rgba(209, 154, 102, 0.2);
+            color: #d19a66;
+          }
+          
+          .file-status-deleted {
+            background: rgba(196, 43, 28, 0.2);
+            color: #f44747;
+          }
+          
+          /* Task steps visualization */
+          .task-steps {
+            margin: 12px 0;
+            background: #252526;
+            border-radius: 6px;
+            padding: 12px;
+          }
+          
+          .task-step {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            margin: 4px 0;
+            border-radius: 4px;
+            background: #2d2d30;
+          }
+          
+          .task-step-status {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-right: 12px;
+            font-size: 12px;
+          }
+          
+          .task-step.completed .task-step-status {
+            background: #2d7d46;
+            color: white;
+          }
+          
+          .task-step.failed .task-step-status {
+            background: #c42b1c;
+            color: white;
+          }
+          
+          .task-step.pending .task-step-status {
+            background: #3e3e42;
+            color: #858585;
+          }
+          
+          .task-step.executing .task-step-status {
+            background: #007acc;
+            color: white;
+            animation: pulse 1.5s infinite;
+          }
+          
+          @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+          }
+          
+          .task-step-info {
+            flex: 1;
+          }
+          
+          .task-step-title {
+            font-weight: 500;
+            font-size: 13px;
+          }
+          
+          .task-step-desc {
+            font-size: 11px;
+            color: #858585;
+            margin-top: 2px;
+          }
+        </style>
+      </head>
+      <body>
+        <!-- Navigation - Cline Style -->
+        <div class="nav">
+          <button class="nav-item ${this.currentView === 'chat' ? 'active' : ''}" data-view="chat">
+            <span class="nav-icon">✨</span>
+            <span>New Chat</span>
+          </button>
+          <button class="nav-item ${this.currentView === 'history' ? 'active' : ''}" data-view="history">
+            <span class="nav-icon">📜</span>
+            <span>History</span>
+          </button>
+          <button class="nav-item ${this.currentView === 'settings' ? 'active' : ''}" data-view="settings">
+            <span class="nav-icon">⚙️</span>
+            <span>Settings</span>
+          </button>
+          
+          <div class="nav-spacer"></div>
+          
+          <div class="model-info" id="modelInfo">
+            ${this.extension.getModelInfo()}
+          </div>
+        </div>
+        
+        <!-- Main Content -->
+        <div class="main-content">
+          <!-- Chat View -->
+          <div class="view ${this.currentView === 'chat' ? 'active' : ''}" id="chatView">
+            <div class="chat-controls">
+              <button onclick="executeSampleTask('Create a simple REST API endpoint')">Sample: REST API</button>
+              <button onclick="executeSampleTask('Implement user authentication')">Sample: Auth</button>
+              <button onclick="executeSampleTask('Fix syntax errors in current file')">Sample: Fix Errors</button>
+              <button onclick="clearChat()">Clear Chat</button>
+            </div>
+            
+            <div class="file-controls">
+              <button onclick="executeFileCommand('listFiles')">📁 List Files</button>
+              <button onclick="executeFileCommand('searchFiles')">🔍 Search Files</button>
+              <button onclick="executeFileCommand('getStats')">📊 Workspace Stats</button>
+              <button onclick="executeFileCommand('browseDirectory')">📂 Browse Directory</button>
+            </div>
+            
+            <div class="chat-container" id="chatContainer">
+              ${messagesHtml}
+              <div id="typingIndicator" class="typing-indicator">
+                CodeLine is thinking
+              </div>
+            </div>
+            
+            <div class="input-container">
+              <textarea 
+                id="messageInput" 
+                placeholder="Describe what you want CodeLine to do (e.g., 'Create a login form', 'Fix this bug', 'Add validation')"
+                onkeydown="handleKeydown(event)"
+              ></textarea>
+              <button id="sendButton" onclick="sendMessage()">Send</button>
+            </div>
+          </div>
+          
+          <!-- History View -->
+          <div class="view ${this.currentView === 'history' ? 'active' : ''}" id="historyView">
+            ${historyHtml}
+          </div>
+          
+          <!-- Settings View -->
+          <div class="view ${this.currentView === 'settings' ? 'active' : ''}" id="settingsView">
+            ${settingsHtml}
+          </div>
+        </div>
+        
+        <script>
+          const vscode = acquireVsCodeApi();
+          
+          // View management
+          const navItems = document.querySelectorAll('.nav-item');
+          const views = document.querySelectorAll('.view');
+          
+          navItems.forEach(item => {
+            item.addEventListener('click', () => {
+              const view = item.getAttribute('data-view');
+              switchView(view);
+            });
+          });
+          
+          function switchView(view) {
+            // Update nav
+            navItems.forEach(item => {
+              item.classList.toggle('active', item.getAttribute('data-view') === view);
+            });
+            
+            // Update views
+            views.forEach(v => {
+              v.classList.toggle('active', v.id === view + 'View');
+            });
+            
+            // Notify extension
+            vscode.postMessage({
+              command: 'switchView',
+              view: view
+            });
+          }
+          
+          // Chat functionality
+          const chatContainer = document.getElementById('chatContainer');
+          const messageInput = document.getElementById('messageInput');
+          const sendButton = document.getElementById('sendButton');
+          const typingIndicator = document.getElementById('typingIndicator');
+          
+          // Handle window messages
+          window.addEventListener('message', event => {
+            const message = event.data;
+            
+            switch (message.command) {
+              case 'typing':
+                typingIndicator.classList.toggle('active', message.isTyping);
+                break;
+              case 'history':
+                // Handle history update
+                break;
+              case 'modelInfo':
+                document.getElementById('modelInfo').textContent = message.modelInfo;
+                break;
+              case 'taskResult':
+                console.log('Task result:', message.result);
+                break;
+              case 'taskError':
+                console.error('Task error:', message.error);
+                break;
+              case 'configUpdated':
+                // Update settings form with new config
+                if (message.config) {
+                  updateSettingsForm(message.config);
+                }
+                break;
+              case 'diffActionResult':
+                // Handle diff approval/rejection result
+                console.log('Diff action result:', message);
+                if (!message.success && message.error) {
+                  // 显示错误
+                  console.error('Diff action failed:', message.error);
+                }
+                break;
+              case 'fileCommandResult':
+                // Handle file command results
+                console.log('File command result:', message.command, message.result);
+                // 可以在这里添加UI更新，比如显示结果面板
+                break;
+              case 'fileCommandError':
+                // Handle file command errors
+                console.error('File command error:', message.command, message.error);
+                // 可以在这里显示错误通知
+                break;
+            }
+          });
+          
+          function sendMessage() {
+            const text = messageInput.value.trim();
+            if (!text) return;
+            
+            vscode.postMessage({
+              command: 'sendMessage',
+              text: text
+            });
+            
+            messageInput.value = '';
+            messageInput.focus();
+          }
+          
+          function executeSampleTask(task) {
+            vscode.postMessage({
+              command: 'executeTask',
+              task: task
+            });
+          }
+          
+          function executeFileCommand(command) {
+            vscode.postMessage({
+              command: 'fileCommand',
+              fileCommand: command
+            });
+          }
+          
+          function clearChat() {
+            if (confirm('Clear all messages?')) {
+              vscode.postMessage({
+                command: 'clearChat'
+              });
+            }
+          }
+          
+          // Settings functionality
+          const temperatureSlider = document.getElementById('temperature');
+          const temperatureValue = document.getElementById('temperatureValue');
+          
+          if (temperatureSlider && temperatureValue) {
+            temperatureSlider.addEventListener('input', function() {
+              temperatureValue.textContent = this.value;
+            });
+          }
+          
+          document.getElementById('saveSettings')?.addEventListener('click', saveSettings);
+          document.getElementById('testConnection')?.addEventListener('click', testConnection);
+          document.getElementById('resetSettings')?.addEventListener('click', resetSettings);
+          
+          function saveSettings() {
+            const config = {
+              apiKey: document.getElementById('apiKey').value,
+              model: document.getElementById('model').value,
+              baseUrl: document.getElementById('baseUrl').value || undefined,
+              temperature: parseFloat(document.getElementById('temperature').value),
+              maxTokens: parseInt(document.getElementById('maxTokens').value),
+              autoAnalyze: document.getElementById('autoAnalyze').checked,
+              showExamples: document.getElementById('showExamples').checked,
+              typingIndicator: document.getElementById('typingIndicator').checked
+            };
+            
+            vscode.postMessage({
+              command: 'saveSettings',
+              config: config
+            });
+          }
+          
+          function testConnection() {
+            vscode.postMessage({
+              command: 'testConnection'
+            });
+          }
+          
+          function resetSettings() {
+            if (confirm('Reset all settings to defaults?')) {
+              vscode.postMessage({
+                command: 'resetSettings'
+              });
+            }
+          }
+          
+          function updateSettingsForm(config) {
+            if (!config) return;
+            
+            const apiKeyInput = document.getElementById('apiKey');
+            const modelSelect = document.getElementById('model');
+            const baseUrlInput = document.getElementById('baseUrl');
+            const temperatureInput = document.getElementById('temperature');
+            const temperatureValueSpan = document.getElementById('temperatureValue');
+            const maxTokensInput = document.getElementById('maxTokens');
+            const autoAnalyzeCheckbox = document.getElementById('autoAnalyze');
+            const showExamplesCheckbox = document.getElementById('showExamples');
+            const typingIndicatorCheckbox = document.getElementById('typingIndicator');
+            
+            if (apiKeyInput) apiKeyInput.value = config.apiKey || '';
+            if (modelSelect) modelSelect.value = config.model || 'deepseek-chat';
+            if (baseUrlInput) baseUrlInput.value = config.baseUrl || '';
+            if (temperatureInput) {
+              temperatureInput.value = config.temperature || 0.7;
+              if (temperatureValueSpan) temperatureValueSpan.textContent = config.temperature || 0.7;
+            }
+            if (maxTokensInput) maxTokensInput.value = config.maxTokens || 2048;
+            if (autoAnalyzeCheckbox) autoAnalyzeCheckbox.checked = !!config.autoAnalyze;
+            if (showExamplesCheckbox) showExamplesCheckbox.checked = config.showExamples !== false;
+            if (typingIndicatorCheckbox) typingIndicatorCheckbox.checked = config.typingIndicator !== false;
+          }
+          
+          function handleKeydown(event) {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              sendMessage();
+            }
+          }
+          
+          // Auto-resize textarea
+          messageInput?.addEventListener('input', function() {
+            this.style.height = 'auto';
+            this.style.height = Math.min(this.scrollHeight, 200) + 'px';
+          });
+          
+          // Initial focus
+          if (messageInput && document.getElementById('chatView').classList.contains('active')) {
+            messageInput.focus();
+          }
+          
+          // Scroll to bottom of chat container
+          if (chatContainer) {
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+          }
+          
+          // Handle diff approval/rejection clicks (event delegation)
+          document.addEventListener('click', function(event) {
+            const target = event.target as HTMLElement;
+            
+            // Check if it's a diff approve button
+            if (target.classList.contains('diff-approve') || 
+                target.closest('.diff-approve')) {
+              const button = target.classList.contains('diff-approve') ? target : target.closest('.diff-approve');
+              const filePath = button.getAttribute('data-file-path');
+              const diffId = button.getAttribute('data-diff-id');
+              
+              console.log('Approving changes for:', filePath);
+              vscode.postMessage({
+                command: 'approveDiff',
+                filePath,
+                diffId,
+                action: 'approve'
+              });
+              
+              // Update UI
+              const diffContainer = button.closest('.diff-container');
+              if (diffContainer) {
+                const actions = diffContainer.querySelector('.diff-actions');
+                if (actions) {
+                  actions.innerHTML = '<span style="color: #2d7d46; font-weight: 500;">✓ Approved</span>';
+                }
+              }
+            }
+            
+            // Check if it's a diff reject button
+            if (target.classList.contains('diff-reject') || 
+                target.closest('.diff-reject')) {
+              const button = target.classList.contains('diff-reject') ? target : target.closest('.diff-reject');
+              const filePath = button.getAttribute('data-file-path');
+              const diffId = button.getAttribute('data-diff-id');
+              
+              console.log('Rejecting changes for:', filePath);
+              vscode.postMessage({
+                command: 'approveDiff',
+                filePath,
+                diffId,
+                action: 'reject'
+              });
+              
+              // Update UI
+              const diffContainer = button.closest('.diff-container');
+              if (diffContainer) {
+                const actions = diffContainer.querySelector('.diff-actions');
+                if (actions) {
+                  actions.innerHTML = '<span style="color: #c42b1c; font-weight: 500;">✗ Rejected</span>';
+                }
+              }
+            }
+          });
+          
+          // Handle collapsible diff sections
+          document.addEventListener('click', function(event) {
+            const target = event.target as HTMLElement;
+            
+            if (target.classList.contains('diff-collapsible-header') || 
+                target.closest('.diff-collapsible-header')) {
+              const header = target.classList.contains('diff-collapsible-header') ? 
+                            target : target.closest('.diff-collapsible-header');
+              const collapsible = header.closest('.diff-collapsible');
+              
+              if (collapsible) {
+                collapsible.classList.toggle('expanded');
+              }
+            }
+          });
+        </script>
+      </body>
+      </html>
+    `;
+  }
+
+  private escapeHtml(unsafe: string): string {
+    // 检查是否包含差异HTML（由FileManager.generateHtmlDiff生成）
+    if (unsafe.includes('class="diff-')) {
+      // 差异HTML已经安全，直接返回
+      return unsafe.replace(/\n/g, "<br>").replace(/  /g, "&nbsp;&nbsp;");
+    }
+    
+    // 检查是否包含终端结果HTML（由TerminalExecutor.generateHtmlReport生成）
+    if (unsafe.includes('class="terminal-')) {
+      // 终端HTML已经安全，直接返回
+      return unsafe.replace(/\n/g, "<br>").replace(/  /g, "&nbsp;&nbsp;");
+    }
+    
+    // 否则转义所有HTML标签
+    return unsafe
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;")
+      .replace(/\n/g, "<br>")
+      .replace(/  /g, "&nbsp;&nbsp;");
+  }
+
+  private dispose() {
+    CodeLineChatPanel.currentPanel = undefined;
+    this.panel.dispose();
+  }
+}
