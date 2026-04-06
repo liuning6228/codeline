@@ -10,6 +10,7 @@ import { FileManagerAdapter } from './adapters/FileManagerAdapter';
 import { TerminalExecutorAdapter } from './adapters/TerminalExecutorAdapter';
 import { BrowserAutomatorAdapter } from './adapters/BrowserAutomatorAdapter';
 import { MCPManagerAdapter } from './adapters/MCPManagerAdapter';
+import { EnhancedBashTool } from './bash/EnhancedBashTool';
 
 /**
  * 工具加载器配置
@@ -246,6 +247,26 @@ export class ToolLoader {
       this.toolRegistry.registerAlias(terminalAdapter.id, 'shell');
       this.toolRegistry.registerAlias(terminalAdapter.id, 'cmd');
       this.toolRegistry.registerAlias(terminalAdapter.id, 'command');
+      
+      // 注册 EnhancedBashTool（增强版终端命令执行，包含沙箱和权限控制）
+      const bashTool = new EnhancedBashTool();
+      const bashRegistered = this.toolRegistry.registerTool(bashTool, [
+        ToolCategory.TERMINAL,
+        ToolCategory.DEVELOPMENT,
+        ToolCategory.UTILITY,
+      ]);
+      
+      if (bashRegistered) {
+        this.context.outputChannel.appendLine('  ✅ EnhancedBashTool registered');
+        // 注册 BashTool 的别名
+        this.toolRegistry.registerAlias(bashTool.id, 'bash');
+        this.toolRegistry.registerAlias(bashTool.id, 'sh');
+        this.toolRegistry.registerAlias(bashTool.id, 'zsh');
+        this.toolRegistry.registerAlias(bashTool.id, 'powershell');
+        this.toolRegistry.registerAlias(bashTool.id, 'pwsh');
+      } else {
+        this.context.outputChannel.appendLine('  ⚠️ BashTool registration failed (may already be registered)');
+      }
       
       return true;
     } catch (error: any) {

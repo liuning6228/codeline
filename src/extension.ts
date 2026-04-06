@@ -206,6 +206,23 @@ export class CodeLineExtension {
     }
     return this.sidebarProvider;
   }
+  
+  /**
+   * 异步初始化SidebarProvider的TaskEngine
+   */
+  public async initializeSidebarProviderTaskEngine(): Promise<void> {
+    const provider = this.getSidebarProvider();
+    if (provider && !provider['_taskEngine']) {
+      try {
+        const { fileManager, taskEngine } = await this.ensureTaskEngineInitialized();
+        provider.setTaskEngine(taskEngine);
+        provider.setFileManager(fileManager);
+        console.log('CodeLine: TaskEngine and FileManager initialized for SidebarProvider');
+      } catch (error) {
+        console.warn('CodeLine: Failed to initialize TaskEngine for SidebarProvider:', error);
+      }
+    }
+  }
 
   /**
    * 获取编辑器命令实例（按需创建）
@@ -848,6 +865,61 @@ export class CodeLineExtension {
       };
     }
   }
+  
+  /**
+   * 获取当前模式
+   */
+  public async getMode(): Promise<'plan' | 'act'> {
+    try {
+      const { taskEngine } = await this.ensureTaskEngineInitialized();
+      return taskEngine.getMode();
+    } catch {
+      return 'act'; // Default mode
+    }
+  }
+  
+  /**
+   * 设置模式
+   */
+  public async setMode(mode: 'plan' | 'act'): Promise<void> {
+    try {
+      const { taskEngine } = await this.ensureTaskEngineInitialized();
+      taskEngine.setMode(mode);
+      
+      // Notify webview of mode change
+      if (this.sidebarProvider) {
+        this.sidebarProvider.postMessage({
+          type: 'modeChanged',
+          mode: mode
+        });
+      }
+    } catch (error: any) {
+      console.error('Failed to set mode:', error);
+    }
+  }
+  
+  /**
+   * 切换模式
+   */
+  public async toggleMode(): Promise<'plan' | 'act'> {
+    try {
+      const { taskEngine } = await this.ensureTaskEngineInitialized();
+      const newMode = taskEngine.toggleMode();
+      
+      // Notify webview of mode change
+      if (this.sidebarProvider) {
+        this.sidebarProvider.postMessage({
+          type: 'modeChanged',
+          mode: newMode
+        });
+      }
+      
+      return newMode;
+    } catch (error: any) {
+      console.error('Failed to toggle mode:', error);
+      return 'act';
+    }
+  }
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -1088,6 +1160,11 @@ export function activate(context: vscode.ExtensionContext) {
     'codeline.chat',
     sidebarProvider
   );
+  
+  // 异步初始化TaskEngine（不阻塞激活过程）
+  codeLine.initializeSidebarProviderTaskEngine().catch(err => {
+    console.warn('CodeLine: Failed to initialize TaskEngine on activation:', err);
+  });
 
   // Register navigation button commands for Cline-style UI
   const chatButtonCommand = vscode.commands.registerCommand('codeline.chatButtonClicked', () => {
@@ -1155,6 +1232,30 @@ export function activate(context: vscode.ExtensionContext) {
     ...[' ', '(', '[', '{', "'", '"', '`'] // 更多触发字符
   );
 
+  // Plan/Act mode toggle commands
+  const toggleModeCommand = vscode.commands.registerCommand('codeline.toggleMode', async () => {
+    const newMode = await codeLine.toggleMode();
+    vscode.window.showInformationMessage(`CodeLine mode: ${newMode.toUpperCase()}`);
+    console.log(`CodeLine: Mode toggled to ${newMode}`);
+  });
+
+  const setPlanModeCommand = vscode.commands.registerCommand('codeline.setPlanMode', async () => {
+    await codeLine.setMode('plan');
+    vscode.window.showInformationMessage('CodeLine: Plan mode enabled');
+    console.log('CodeLine: Plan mode enabled');
+  });
+
+  const setActModeCommand = vscode.commands.registerCommand('codeline.setActMode', async () => {
+    await codeLine.setMode('act');
+    vscode.window.showInformationMessage('CodeLine: Act mode enabled');
+    console.log('CodeLine: Act mode enabled');
+  });
+
+  const getModeCommand = vscode.commands.registerCommand('codeline.getMode', async () => {
+    const mode = await codeLine.getMode();
+    vscode.window.showInformationMessage(`CodeLine current mode: ${mode.toUpperCase()}`);
+  });
+
   context.subscriptions.push(
     startChatCommand,
     executeTaskCommand,
@@ -1181,7 +1282,11 @@ export function activate(context: vscode.ExtensionContext) {
     explainCodeCommand,
     improveCodeCommand,
     generateGitCommitMessageCommand,
-    completionRegistration
+    completionRegistration,
+    toggleModeCommand,
+    setPlanModeCommand,
+    setActModeCommand,
+    getModeCommand
   );
 }
 

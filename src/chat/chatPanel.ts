@@ -2,6 +2,28 @@ import * as vscode from 'vscode';
 import { CodeLineExtension } from '../extension';
 import { TaskResult } from '../task/taskEngine';
 import { TaskEventUnion } from '../task/taskTypes';
+import { createToolProgressService } from '../services/ToolProgressService';
+import { createConfigManager } from '../config/ConfigManager';
+import { createPermissionManager } from '../auth/PermissionManager';
+
+// 自动批准设置类型定义（与前端保持一致）
+interface AutoApprovalSettings {
+  version: number;
+  enabled: boolean;
+  favorites: string[];
+  maxRequests: number;
+  actions: {
+    readFiles: boolean;
+    readFilesExternally?: boolean;
+    editFiles: boolean;
+    editFilesExternally?: boolean;
+    executeSafeCommands?: boolean;
+    executeAllCommands?: boolean;
+    useBrowser: boolean;
+    useMcp: boolean;
+  };
+  enableNotifications: boolean;
+}
 
 export interface ChatMessage {
   id: string;
@@ -19,6 +41,26 @@ export class CodeLineChatPanel {
   private messages: ChatMessage[] = [];
   private isProcessing = false;
   private currentView: 'chat' | 'settings' | 'history' | 'mcp' | 'account' = 'chat';
+  private toolProgressService = createToolProgressService();
+  private configManager = createConfigManager();
+  private permissionManager = createPermissionManager();
+  private autoApprovalSettings: AutoApprovalSettings = {
+    version: 1,
+    enabled: true,
+    favorites: [],
+    maxRequests: 20,
+    actions: {
+      readFiles: true,
+      readFilesExternally: false,
+      editFiles: false,
+      editFilesExternally: false,
+      executeSafeCommands: true,
+      executeAllCommands: false,
+      useBrowser: false,
+      useMcp: false,
+    },
+    enableNotifications: false,
+  };
 
   public static createOrShow(context: vscode.ExtensionContext, extension: CodeLineExtension) {
     const column = vscode.window.activeTextEditor
@@ -58,6 +100,9 @@ export class CodeLineChatPanel {
     // Set the webview's initial html content
     this.updateWebview();
 
+    // 加载自动批准设置
+    this.loadAutoApprovalSettings();
+
     // Listen for when the panel is disposed
     this.panel.onDidDispose(() => this.dispose(), null, this.context.subscriptions);
 
@@ -69,6 +114,42 @@ export class CodeLineChatPanel {
       null,
       this.context.subscriptions
     );
+
+    // 设置工具进度服务的WebView面板
+    this.toolProgressService.setWebviewPanel(panel);
+  }
+
+  /**
+   * 从存储加载自动批准设置
+   */
+  private loadAutoApprovalSettings() {
+    try {
+      // 从全局存储加载设置
+      const savedSettings = this.context.globalState.get('codeline.autoApprovalSettings') as Partial<AutoApprovalSettings>;
+      
+      if (savedSettings) {
+        // 合并保存的设置与默认设置，确保所有字段都存在
+        this.autoApprovalSettings = {
+          ...this.autoApprovalSettings, // 默认设置
+          ...savedSettings, // 保存的设置
+          actions: {
+            ...this.autoApprovalSettings.actions, // 默认操作设置
+            ...(savedSettings.actions || {}) // 保存的操作设置
+          }
+        };
+        
+        console.log('已加载自动批准设置:', this.autoApprovalSettings);
+      } else {
+        console.log('未找到保存的自动批准设置，使用默认设置');
+      }
+      
+      // 更新权限管理器的自动批准设置
+      this.permissionManager.setAutoApprovalSettings(this.autoApprovalSettings);
+    } catch (error) {
+      console.error('加载自动批准设置失败:', error);
+      // 继续使用默认设置
+      this.permissionManager.setAutoApprovalSettings(this.autoApprovalSettings);
+    }
   }
 
   public async show() {
@@ -129,11 +210,23 @@ export class CodeLineChatPanel {
       case 'addMCP':
         await this.handleAddMCP();
         break;
+      case 'loadConfig':
+        await this.handleLoadConfig();
+        break;
+      case 'saveConfig':
+        await this.handleSaveConfig(message.config);
+        break;
       case 'executeTaskWithStream':
         await this.handleTaskExecutionWithStream(message.task);
         break;
       case 'taskEvent':
         await this.handleTaskEvent(message.event);
+        break;
+      case 'loadAutoApproveSettings':
+        await this.handleLoadAutoApproveSettings();
+        break;
+      case 'updateAutoApproveSettings':
+        await this.handleUpdateAutoApproveSettings(message.settings);
         break;
     }
   }
@@ -2708,8 +2801,126 @@ export class CodeLineChatPanel {
     this.sendMessageToWebview('task_event', { event });
   }
 
+  /**
+   * 处理加载自动批准设置请求
+   */
+  private async handleLoadAutoApproveSettings() {
+    try {
+      // 返回当前自动批准设置
+      this.sendMessageToWebview('autoApproveSettingsLoaded', { 
+        success: true, 
+        settings: this.autoApprovalSettings 
+      });
+    } catch (error) {
+      console.error('加载自动批准设置失败:', error);
+      this.sendMessageToWebview('autoApproveSettingsLoaded', { 
+        success: false, 
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
+   * 处理更新自动批准设置请求
+   */
+  private async handleUpdateAutoApproveSettings(settings: AutoApprovalSettings) {
+    try {
+      // 验证设置版本
+      const currentVersion = this.autoApprovalSettings.version || 1;
+      const newVersion = settings.version || 1;
+      
+      if (newVersion <= currentVersion) {
+        throw new Error(`设置版本过时。当前版本: ${currentVersion}, 接收版本: ${newVersion}`);
+      }
+      
+      // 更新设置
+      this.autoApprovalSettings = settings;
+      
+      // 更新权限管理器的自动批准设置
+      this.permissionManager.setAutoApprovalSettings(settings);
+      
+      // 保存到扩展存储
+      if (this.context.globalState) {
+        await this.context.globalState.update('codeline.autoApprovalSettings', settings);
+      }
+      
+      this.sendMessageToWebview('autoApproveSettingsUpdated', { 
+        success: true, 
+        version: settings.version 
+      });
+      
+      // 通知所有组件设置已更新
+      this.sendMessageToWebview('autoApproveSettingsChanged', { 
+        settings: this.autoApprovalSettings 
+      });
+    } catch (error) {
+      console.error('保存自动批准设置失败:', error);
+      this.sendMessageToWebview('autoApproveSettingsUpdateError', { 
+        success: false, 
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
+   * 处理加载配置请求
+   */
+  private async handleLoadConfig() {
+    try {
+      // 确保配置已加载
+      await this.configManager.load();
+      const config = this.configManager.getConfig();
+      
+      this.sendMessageToWebview('configLoaded', { 
+        success: true, 
+        config 
+      });
+    } catch (error) {
+      console.error('加载配置失败:', error);
+      this.sendMessageToWebview('configLoaded', { 
+        success: false, 
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
+  /**
+   * 处理保存配置请求
+   */
+  private async handleSaveConfig(config: any) {
+    try {
+      // 更新配置
+      const success = await this.configManager.updateConfig(config);
+      
+      if (success) {
+        this.sendMessageToWebview('configSaved', { 
+          success: true, 
+          message: 'Configuration saved successfully' 
+        });
+        
+        // 通知所有组件配置已更新
+        this.sendMessageToWebview('configUpdated', { 
+          config: this.configManager.getConfig() 
+        });
+      } else {
+        this.sendMessageToWebview('configSaved', { 
+          success: false, 
+          error: 'Failed to save configuration' 
+        });
+      }
+    } catch (error) {
+      console.error('保存配置失败:', error);
+      this.sendMessageToWebview('configSaved', { 
+        success: false, 
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  }
+
   private dispose() {
     CodeLineChatPanel.currentPanel = undefined;
+    // 清理工具进度服务
+    this.toolProgressService.clearWebviewPanel();
     this.panel.dispose();
   }
 }

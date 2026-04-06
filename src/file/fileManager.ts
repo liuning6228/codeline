@@ -72,7 +72,7 @@ export class FileManager {
   }
   
   /**
-   * 编辑文件（带差异计算）
+   * 编辑文件（带差异计算）- 立即写入模式
    */
   public async editFileWithDiff(filePath: string, newContent: string): Promise<FileOperationResult> {
     try {
@@ -108,6 +108,41 @@ export class FileManager {
         filePath,
         error: error.message,
         message: `Failed to edit file: ${filePath}`
+      };
+    }
+  }
+  
+  /**
+   * 准备文件编辑（Cline风格）- 不立即写入，只返回diff供预览
+   */
+  public async prepareFileEdit(filePath: string, newContent: string): Promise<FileOperationResult> {
+    try {
+      const fullPath = this.resolvePath(filePath);
+      
+      // 读取现有内容
+      const oldContent = await this.readFileIfExists(fullPath);
+      
+      // 计算差异
+      const diff: FileDiff = {
+        filePath,
+        oldContent,
+        newContent,
+        changes: this.calculateChanges(oldContent, newContent),
+        summary: this.generateDiffSummary(oldContent, newContent)
+      };
+      
+      return {
+        success: true,
+        filePath,
+        diff,
+        message: `Prepared edit for: ${filePath}`
+      };
+    } catch (error: any) {
+      return {
+        success: false,
+        filePath,
+        error: error.message,
+        message: `Failed to prepare edit for: ${filePath}`
       };
     }
   }

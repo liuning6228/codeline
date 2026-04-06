@@ -22,45 +22,68 @@ export interface DiffViewOptions {
   contextDescription?: string;
 }
 
+export interface DiffPreviewResult {
+  applied: boolean;
+  rejected: boolean;
+  tempLeftUri?: vscode.Uri;
+  tempRightUri?: vscode.Uri;
+}
+
 /**
  * Cline-style diff viewer that opens multi-file diff views in the workspace
  * with visual comparison and approval workflow.
+ * 
+ * Features:
+ * - Creates temporary files for before/after comparison
+ * - Opens VS Code's built-in diff editor
+ * - Supports approval workflow with apply/reject buttons
  */
 export class DiffViewer {
   private static tempDir: string | undefined;
   private static tempFiles: string[] = [];
+  private static activeDiffEditors: Map<string, vscode.TextEditor> = new Map();
 
   /**
    * Open multi-file diff view in workspace (Cline style)
+   * Creates temporary files for before/after comparison and opens VS Code's diff editor
    */
   public static async openMultiFileDiff(
     changedFiles: ChangedFile[],
     options: DiffViewOptions = {}
-  ): Promise<{ applied: boolean; rejected: boolean }> {
+  ): Promise<DiffPreviewResult> {
     const title = options.title || 'CodeLine Changes';
     const showApplyButton = options.showApplyButton ?? true;
     const showRejectButton = options.showRejectButton ?? true;
-
+  
     // Create temp directory for diff files
     const tempDir = await this.getTempDir();
     const tempFiles: { left: vscode.Uri; right: vscode.Uri; originalPath: string }[] = [];
-
+  
     // Create temporary files for each diff
     for (const file of changedFiles) {
-      const leftUri = await this.createTempFile(tempDir, `${path.basename(file.absolutePath)}.original`, file.before);
-      const rightUri = await this.createTempFile(tempDir, `${path.basename(file.absolutePath)}.modified`, file.after);
-      
+      // Create unique filename with timestamp to avoid conflicts
+      const sanitizedFileName = this.sanitizeFileName(file.relativePath);
+      const leftFileName = `${sanitizedFileName}.original`;
+      const rightFileName = `${sanitizedFileName}.modified`;
+        
+      const leftUri = await this.createTempFile(tempDir, leftFileName, file.before);
+      const rightUri = await this.createTempFile(tempDir, rightFileName, file.after);
+        
       tempFiles.push({
         left: leftUri,
         right: rightUri,
         originalPath: file.absolutePath
       });
+        
+      console.log(`[DiffViewer] Created temp files for ${file.relativePath}:`);
+      console.log(`  - Left (original): ${leftUri.fsPath}`);
+      console.log(`  - Right (modified): ${rightUri.fsPath}`);
     }
-
+  
     // Open diff editors in groups
     const appliedFiles: string[] = [];
     const rejectedFiles: string[] = [];
-
+  
     // Show a quick pick to let user choose which files to view
     if (changedFiles.length > 1) {
       const fileChoices = changedFiles.map((file, index) => ({
@@ -69,12 +92,12 @@ export class DiffViewer {
         detail: `Lines changed: ${this.calculateChangeCount(file.before, file.after)}`,
         index
       }));
-
+  
       // Open first file diff immediately
       if (tempFiles.length > 0) {
         await this.openSingleDiff(tempFiles[0].left, tempFiles[0].right, `${title} - ${path.basename(tempFiles[0].originalPath)}`);
       }
-
+  
       // Show notification with action buttons
       const result = await vscode.window.showInformationMessage(
         `${changedFiles.length} files changed. Review changes in diff view.`,
@@ -83,7 +106,7 @@ export class DiffViewer {
         'Reject All',
         'Review Each'
       );
-
+  
       if (result === 'Apply All') {
         // Clean up temp files
         await this.cleanupTempFiles();
@@ -96,7 +119,7 @@ export class DiffViewer {
         for (let i = 0; i < tempFiles.length; i++) {
           const tempFile = tempFiles[i];
           const changedFile = changedFiles[i];
-          
+            
           const action = await vscode.window.showInformationMessage(
             `Review changes to ${path.basename(changedFile.absolutePath)}`,
             { modal: true },
@@ -104,7 +127,7 @@ export class DiffViewer {
             'Reject',
             'Skip'
           );
-
+  
           if (action === 'Apply') {
             appliedFiles.push(changedFile.absolutePath);
             // Apply the changes
@@ -113,18 +136,18 @@ export class DiffViewer {
             rejectedFiles.push(changedFile.absolutePath);
           }
         }
-
+  
         await this.cleanupTempFiles();
         return { 
           applied: appliedFiles.length > 0, 
-          rejected: rejectedFiles.length === changedFiles.length 
+          rejected: rejectedFiles.length === changedFiles.length
         };
       }
     } else {
       // Single file - open diff directly
       const tempFile = tempFiles[0];
       await this.openSingleDiff(tempFile.left, tempFile.right, title);
-
+  
       // Show action buttons in the diff editor itself
       const result = await vscode.window.showInformationMessage(
         'Apply these changes?',
@@ -132,9 +155,9 @@ export class DiffViewer {
         'Apply Changes',
         'Reject Changes'
       );
-
+  
       await this.cleanupTempFiles();
-
+  
       if (result === 'Apply Changes') {
         // Apply the changes
         const changedFile = changedFiles[0];
@@ -144,6 +167,45 @@ export class DiffViewer {
         return { applied: false, rejected: true };
       }
     }
+  }
+  
+  /**
+   * Create a diff preview without applying changes
+   * Returns the temp file URIs for external handling
+   */
+  public static async createDiffPreview(
+    filePath: string,
+    oldContent: string,
+    newContent: string
+  ): Promise<{ leftUri: vscode.Uri; rightUri: vscode.Uri }> {
+    const tempDir = await this.getTempDir();
+    const sanitizedFileName = this.sanitizeFileName(filePath);
+    const timestamp = Date.now();
+      
+    const leftUri = await this.createTempFile(
+      tempDir, 
+      `${sanitizedFileName}.${timestamp}.original`, 
+      oldContent
+    );
+    const rightUri = await this.createTempFile(
+      tempDir, 
+      `${sanitizedFileName}.${timestamp}.modified`, 
+      newContent
+    );
+      
+    return { leftUri, rightUri };
+  }
+  
+  /**
+   * Open a diff editor for preview
+   */
+  public static async openDiffEditor(
+    leftUri: vscode.Uri,
+    rightUri: vscode.Uri,
+    title: string,
+    originalFilePath?: string
+  ): Promise<void> {
+    await this.openSingleDiff(leftUri, rightUri, title);
   }
 
   /**
@@ -231,6 +293,21 @@ export class DiffViewer {
     const beforeLines = before.split('\n').length;
     const afterLines = after.split('\n').length;
     return Math.abs(beforeLines - afterLines);
+  }
+
+  /**
+   * Sanitize file path for use as a temporary filename
+   * Replaces path separators and special characters with underscores
+   */
+  private static sanitizeFileName(filePath: string): string {
+    // Get just the filename if it's a path
+    const basename = path.basename(filePath);
+    // Replace special characters with underscores
+    return basename
+      .replace(/[\\/:*?"<>|]/g, '_')
+      .replace(/\s+/g, '_')
+      .replace(/\.+/g, '.')
+      .substring(0, 100); // Limit length
   }
 
   /**

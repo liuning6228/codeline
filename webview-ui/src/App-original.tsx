@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import ChatView from './components/chat/ChatView'
+import EnhancedChatView from './components/chat/EnhancedChatView'
 import SettingsView from './components/settings/SettingsView'
 import HistoryView from './components/history/HistoryView'
 import WelcomeView from './components/welcome/WelcomeView'
@@ -34,7 +34,7 @@ function App() {
   const renderView = () => {
     switch (currentView) {
       case 'chat':
-        return <ChatView />
+        return <EnhancedChatView />
       case 'settings':
         return <SettingsView onClose={() => setCurrentView('chat')} />
       case 'history':
@@ -42,7 +42,7 @@ function App() {
       case 'welcome':
         return <WelcomeView onGetStarted={() => setCurrentView('chat')} />
       default:
-        return <ChatView />
+        return <EnhancedChatView />
     }
   }
 

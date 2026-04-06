@@ -38,6 +38,11 @@ export interface TaskOptions {
   autoExecute?: boolean;
   requireApproval?: boolean;
   promptOptions?: PromptOptions;
+  /**
+   * Plan mode: Only plan tasks without executing
+   * Act mode: Plan and execute tasks automatically
+   */
+  mode?: 'plan' | 'act';
 }
 
 export class TaskEngine {
@@ -54,6 +59,10 @@ export class TaskEngine {
   private isExecuting = false;
   private pendingDiffs: Map<string, FileDiff> = new Map(); // diffId -> FileDiff
   private approvalWorkflow: ApprovalWorkflow;
+  
+  // Plan/Act mode state
+  private currentMode: 'plan' | 'act' = 'act';
+  private onModeChange?: (mode: 'plan' | 'act') => void;
   
   constructor(
     projectAnalyzer: EnhancedProjectAnalyzer,
@@ -164,14 +173,20 @@ export class TaskEngine {
       
       // 7. 如果需要自动执行，开始执行步骤
       let executionResult = '';
-      if (this.currentTask.options.autoExecute) {
+      
+      // Determine if we should execute based on mode
+      const shouldExecute = this.currentTask.options.autoExecute && this.currentMode === 'act';
+      
+      if (shouldExecute) {
         executionResult = await this.executeSteps();
       }
       
       return {
         success: true,
         steps: this.steps,
-        output: executionResult || 'Task planned successfully. Ready for execution.',
+        output: executionResult || (this.currentMode === 'plan' 
+          ? 'Task planned successfully. Switch to Act mode to execute.'
+          : 'Task planned successfully. Ready for execution.'),
         error: undefined
       };
       
@@ -350,6 +365,40 @@ export class TaskEngine {
     this.steps = [];
     this.pendingDiffs.clear();
     this.isExecuting = false;
+  }
+  
+  /**
+   * 获取当前模式
+   */
+  public getMode(): 'plan' | 'act' {
+    return this.currentMode;
+  }
+  
+  /**
+   * 设置当前模式
+   */
+  public setMode(mode: 'plan' | 'act'): void {
+    if (this.currentMode !== mode) {
+      this.currentMode = mode;
+      this.onModeChange?.(mode);
+      console.log(`[CodeLine] Mode changed to: ${mode}`);
+    }
+  }
+  
+  /**
+   * 设置模式变更回调
+   */
+  public setOnModeChange(callback: (mode: 'plan' | 'act') => void): void {
+    this.onModeChange = callback;
+  }
+  
+  /**
+   * 切换模式
+   */
+  public toggleMode(): 'plan' | 'act' {
+    const newMode = this.currentMode === 'plan' ? 'act' : 'plan';
+    this.setMode(newMode);
+    return newMode;
   }
   
   /**
@@ -965,17 +1014,31 @@ ${prompt}
     
     let result: FileOperationResult;
     
+    // 检查是否需要批准（非自动批准模式）
+    const requiresApproval = this.currentTask?.options.requireApproval ?? true;
+    const autoApprove = !requiresApproval;
+    
     if (exists) {
-      // 编辑现有文件
-      result = await this.fileManager.editFileWithDiff(filePath, cleanedCodeContent);
+      if (autoApprove) {
+        // 自动批准模式：直接写入文件
+        result = await this.fileManager.editFileWithDiff(filePath, cleanedCodeContent);
+      } else {
+        // Cline风格：先准备编辑，不写入文件，等待用户批准
+        result = await this.fileManager.prepareFileEdit(filePath, cleanedCodeContent);
+      }
     } else {
-      // 创建新文件
-      result = await this.fileManager.createFile(filePath, cleanedCodeContent);
+      // 新文件创建
+      if (autoApprove) {
+        result = await this.fileManager.createFile(filePath, cleanedCodeContent);
+      } else {
+        // 对于新文件，也使用prepare模式
+        result = await this.fileManager.prepareFileEdit(filePath, cleanedCodeContent);
+      }
     }
     
     // 生成Cline风格的差异显示
     if (result.diff) {
-      const diffId = step.description.replace(/\s+/g, '-').toLowerCase();
+      const diffId = step.description.replace(/\s+/g, '-').toLowerCase() + '-' + Date.now();
       
       // 存储待处理的差异
       this.pendingDiffs.set(diffId, result.diff);

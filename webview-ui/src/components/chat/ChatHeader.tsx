@@ -1,8 +1,9 @@
 interface ChatHeaderProps {
   onClearChat: () => void
+  additionalActions?: React.ReactNode
 }
 
-const ChatHeader = ({ onClearChat }: ChatHeaderProps) => {
+const ChatHeader = ({ onClearChat, additionalActions }: ChatHeaderProps) => {
   return (
     <div className="flex items-center justify-between border-b border-border px-4 py-3">
       <div className="flex items-center space-x-3">
@@ -23,6 +24,8 @@ const ChatHeader = ({ onClearChat }: ChatHeaderProps) => {
           </svg>
           <span>Clear Chat</span>
         </button>
+        
+        {additionalActions}
         
         <div className="relative">
           <button className="flex items-center space-x-2 rounded-lg border border-border bg-secondary px-3 py-1.5 text-sm hover:bg-secondary/80">
