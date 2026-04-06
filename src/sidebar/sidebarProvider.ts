@@ -546,40 +546,35 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
     
     private async handleApproveDiff(diffId: string, action: 'approve' | 'reject', webviewView: vscode.WebviewView) {
         try {
+            let result: any;
+            
             // 首先尝试使用TaskEngine
             if (this._taskEngine) {
-                const result = await this._taskEngine.approveDiff(diffId, action);
-                
-                // 如果成功，从待处理列表中移除
-                if (result.success) {
-                    this._pendingDiffs.delete(diffId);
-                }
-                
-                webviewView.webview.postMessage({
-                    type: 'diffResult',
-                    diffId,
-                    action,
-                    success: result.success,
-                    message: result.message
-                });
-                return;
+                result = await this._taskEngine.approveDiff(diffId, action);
+            } else {
+                // 回退到扩展方法
+                result = await this._extension.approveFileDiff(diffId, action);
             }
             
-            // 回退到扩展方法
-            const result = await this._extension.approveFileDiff(diffId, action);
+            // 如果成功，从待处理列表中移除
+            if (result.success) {
+                this._pendingDiffs.delete(diffId);
+            }
+            
+            // 发送结果到WebView - 使用command格式与前端匹配
             webviewView.webview.postMessage({
-                type: 'diffResult',
+                command: action === 'approve' ? 'diffApproved' : 'diffRejected',
                 diffId,
-                action,
+                filePath: result.filePath || '',
                 success: result.success,
                 message: result.message
             });
         } catch (error: any) {
             console.error('Failed to approve/reject diff:', error);
             webviewView.webview.postMessage({
-                type: 'diffResult',
+                command: action === 'approve' ? 'diffApproved' : 'diffRejected',
                 diffId,
-                action,
+                filePath: '',
                 success: false,
                 message: error.message
             });
@@ -722,36 +717,37 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
             flex-direction: column;
         }
         
-        /* 导航栏 */
+        /* Cline风格导航栏 */
         .nav-bar {
             display: flex;
-            background: #252526;
-            border-bottom: 1px solid #333;
-            padding: 8px 12px;
-            gap: 8px;
+            background: var(--vscode-editor-inactiveSelectionBackground, #252526);
+            border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
+            padding: 4px 8px;
+            gap: 2px;
         }
         
         .nav-tab {
-            padding: 8px 16px;
+            padding: 6px 12px;
             background: transparent;
-            color: #cccccc;
+            color: var(--vscode-descriptionForeground, #888);
             border: none;
-            border-radius: 4px;
+            border-radius: 3px;
             cursor: pointer;
-            font-size: 14px;
+            font-size: 12px;
             display: flex;
             align-items: center;
-            gap: 6px;
-            transition: all 0.2s;
+            gap: 4px;
+            transition: all 0.15s;
         }
         
         .nav-tab:hover {
-            background: #2a2d2e;
+            background: var(--vscode-list-hoverBackground, #2a2d2e);
+            color: var(--vscode-foreground, #cccccc);
         }
         
         .nav-tab.active {
-            background: #094771;
-            color: #ffffff;
+            background: var(--vscode-editor-background, #1e1e1e);
+            color: var(--vscode-foreground, #ffffff);
         }
         
         /* 主要内容区域 */
@@ -786,121 +782,161 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
             padding: 16px;
         }
         
-        /* 消息样式 */
+        /* Cline风格消息样式 */
         .message {
-            margin-bottom: 20px;
-            max-width: 85%;
-        }
-        
-        .message.user {
-            margin-left: auto;
+            margin-bottom: 16px;
+            padding: 0 16px;
         }
         
         .message-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            margin-bottom: 6px;
-            font-size: 12px;
-            opacity: 0.8;
+            margin-bottom: 4px;
+            font-size: 11px;
+            color: var(--vscode-descriptionForeground, #888);
+        }
+        
+        .message-header .role {
+            font-weight: 600;
+            color: var(--vscode-foreground, #cccccc);
         }
         
         .message-actions {
             display: flex;
-            gap: 8px;
-            margin-left: 10px;
+            gap: 4px;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+        
+        .message:hover .message-actions {
+            opacity: 1;
         }
         
         .message-action {
             background: transparent;
             border: none;
-            color: #cccccc;
+            color: var(--vscode-descriptionForeground, #888);
             cursor: pointer;
-            padding: 2px 4px;
+            padding: 2px 6px;
             border-radius: 3px;
-            font-size: 12px;
+            font-size: 11px;
         }
         
         .message-action:hover {
-            background: #2a2d2e;
-            color: #ffffff;
+            background: var(--vscode-toolbar-hoverBackground, #2a2d2e);
+            color: var(--vscode-foreground, #cccccc);
         }
         
         .message-content {
-            padding: 12px 16px;
-            border-radius: 8px;
-            line-height: 1.5;
+            line-height: 1.6;
             word-wrap: break-word;
+            color: var(--vscode-foreground, #cccccc);
+            font-size: 13px;
         }
         
-        .message.user .message-content {
-            background: #005a9e;
+        .message-content pre {
+            background: var(--vscode-textCodeBlock-background, #0d0d0d);
+            padding: 12px;
+            border-radius: 3px;
+            overflow-x: auto;
+            font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+            font-size: 12px;
+            margin: 8px 0;
         }
         
-        .message.assistant .message-content {
-            background: #252526;
-            border: 1px solid #333;
+        .message-content code {
+            background: var(--vscode-textCodeBlock-background, #0d0d0d);
+            padding: 2px 4px;
+            border-radius: 2px;
+            font-family: var(--vscode-editor-font-family, 'Consolas', monospace);
+            font-size: 12px;
         }
         
-        /* 输入区域 */
+        /* Cline风格输入区域 */
         .input-area {
-            padding: 16px;
-            background: #252526;
-            border-top: 1px solid #333;
+            padding: 12px 16px;
+            background: var(--vscode-editor-background, #1e1e1e);
+            border-top: 1px solid var(--vscode-panel-border, #3e3e42);
         }
         
         .input-wrapper {
             display: flex;
-            gap: 12px;
+            gap: 8px;
             align-items: flex-end;
+            background: var(--vscode-input-background, #3c3c3c);
+            border: 1px solid var(--vscode-input-border, #3e3e42);
+            border-radius: 4px;
+            padding: 8px;
+        }
+        
+        .input-wrapper:focus-within {
+            border-color: var(--vscode-focusBorder, #007fd4);
         }
         
         textarea {
             flex: 1;
-            min-height: 60px;
+            min-height: 40px;
             max-height: 200px;
-            padding: 12px;
-            background: #333;
-            color: white;
-            border: 1px solid #444;
-            border-radius: 6px;
+            padding: 4px 8px;
+            background: transparent;
+            color: var(--vscode-input-foreground, #cccccc);
+            border: none;
             font-family: inherit;
-            font-size: 14px;
-            resize: vertical;
+            font-size: 13px;
+            resize: none;
             line-height: 1.5;
+            outline: none;
         }
         
-        textarea:focus {
-            outline: none;
-            border-color: #007acc;
+        .input-actions {
+            display: flex;
+            gap: 4px;
+            align-items: center;
+        }
+        
+        .input-action-btn {
+            padding: 4px 8px;
+            background: transparent;
+            border: none;
+            color: var(--vscode-descriptionForeground, #888);
+            font-size: 12px;
+            cursor: pointer;
+            border-radius: 3px;
+            transition: all 0.15s;
+        }
+        
+        .input-action-btn:hover {
+            background: var(--vscode-toolbar-hoverBackground, #2a2d2e);
+            color: var(--vscode-foreground, #cccccc);
         }
         
         .send-button {
-            padding: 12px 24px;
-            height: 44px;
-            background: #007acc;
-            color: white;
+            padding: 6px 12px;
+            background: var(--vscode-button-background, #0e639c);
+            color: var(--vscode-button-foreground, #ffffff);
             border: none;
-            border-radius: 6px;
+            border-radius: 3px;
             cursor: pointer;
+            font-size: 12px;
             font-weight: 500;
-            transition: background 0.2s;
+            transition: background 0.15s;
         }
         
         .send-button:hover {
-            background: #005a9e;
+            background: var(--vscode-button-hoverBackground, #1177bb);
         }
         
         .send-button:disabled {
-            background: #333;
-            color: #666;
+            background: var(--vscode-button-secondaryBackground, #5a5a5a);
+            color: var(--vscode-button-secondaryForeground, #cccccc);
             cursor: not-allowed;
         }
         
-        /* 设置视图 */
+        /* Cline风格设置视图 */
         .settings-view {
             display: none;
-            padding: 24px;
+            padding: 16px;
             overflow-y: auto;
             opacity: 0;
             transform: translateX(20px);
@@ -914,78 +950,92 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
         }
         
         .settings-title {
-            font-size: 20px;
-            margin-bottom: 20px;
-            color: #007acc;
+            font-size: 16px;
+            margin-bottom: 16px;
+            color: var(--vscode-foreground, #cccccc);
+            font-weight: 600;
         }
         
         .settings-section {
-            margin-bottom: 30px;
-            padding: 20px;
-            background: #252526;
-            border-radius: 8px;
-            border: 1px solid #333;
+            margin-bottom: 20px;
+            padding: 16px;
+            background: var(--vscode-editor-inactiveSelectionBackground, #252526);
+            border-radius: 4px;
+            border: 1px solid var(--vscode-panel-border, #3e3e42);
         }
         
         .settings-section h3 {
-            margin-bottom: 15px;
-            color: #cccccc;
+            margin-bottom: 12px;
+            color: var(--vscode-foreground, #cccccc);
+            font-size: 13px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         
         .settings-group {
-            margin-bottom: 15px;
+            margin-bottom: 12px;
         }
         
         .settings-label {
             display: block;
-            margin-bottom: 8px;
-            font-size: 14px;
-            color: #cccccc;
+            margin-bottom: 6px;
+            font-size: 12px;
+            color: var(--vscode-foreground, #cccccc);
         }
         
         .settings-input {
             width: 100%;
-            padding: 10px;
-            background: #333;
-            color: white;
-            border: 1px solid #444;
-            border-radius: 4px;
+            padding: 8px 10px;
+            background: var(--vscode-input-background, #3c3c3c);
+            color: var(--vscode-input-foreground, #cccccc);
+            border: 1px solid var(--vscode-input-border, #3e3e42);
+            border-radius: 3px;
             font-family: inherit;
+            font-size: 13px;
+        }
+        
+        .settings-input:focus {
+            outline: none;
+            border-color: var(--vscode-focusBorder, #007fd4);
         }
         
         .settings-button {
-            padding: 10px 20px;
-            background: #007acc;
-            color: white;
+            padding: 6px 12px;
+            background: var(--vscode-button-background, #0e639c);
+            color: var(--vscode-button-foreground, #ffffff);
             border: none;
-            border-radius: 4px;
+            border-radius: 3px;
             cursor: pointer;
-            margin-right: 10px;
+            margin-right: 8px;
+            font-size: 12px;
+            transition: background 0.15s;
         }
         
         .settings-button:hover {
-            background: #005a9e;
+            background: var(--vscode-button-hoverBackground, #1177bb);
         }
         
         .settings-button.secondary {
-            background: #333;
+            background: var(--vscode-button-secondaryBackground, #5a5a5a);
+            color: var(--vscode-button-secondaryForeground, #cccccc);
         }
         
         .settings-button.secondary:hover {
-            background: #2a2d2e;
+            background: var(--vscode-toolbar-hoverBackground, #3c3c3c);
         }
         
-        /* 自动批准设置 - 参考Cline设计 */
+        /* Cline风格自动批准设置 */
         .auto-approve-panel {
-            background: #252526;
-            border-top: 1px solid #333;
+            background: var(--vscode-editor-background, #1e1e1e);
+            border-top: 1px solid var(--vscode-panel-border, #3e3e42);
             max-height: 0;
             overflow: hidden;
             transition: max-height 0.3s ease;
         }
         
         .auto-approve-panel.expanded {
-            max-height: 400px;
+            max-height: 500px;
             overflow-y: auto;
         }
         
@@ -998,32 +1048,36 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
             justify-content: space-between;
             align-items: center;
             margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--vscode-panel-border, #3e3e42);
         }
         
         .auto-approve-header h4 {
-            color: #cccccc;
-            font-size: 13px;
-            font-weight: 500;
+            color: var(--vscode-foreground, #cccccc);
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
         }
         
         .auto-approve-toggle {
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 8px 12px;
-            background: #2a2d2e;
-            border-top: 1px solid #333;
+            padding: 8px 16px;
+            background: var(--vscode-editor-inactiveSelectionBackground, #252526);
+            border-top: 1px solid var(--vscode-panel-border, #3e3e42);
             cursor: pointer;
-            transition: background 0.2s;
+            transition: background 0.15s;
         }
         
         .auto-approve-toggle:hover {
-            background: #323537;
+            background: var(--vscode-list-hoverBackground, #2a2d2e);
         }
         
         .auto-approve-toggle-icon {
-            color: #888;
-            font-size: 12px;
+            color: var(--vscode-descriptionForeground, #888);
+            font-size: 10px;
             transition: transform 0.2s;
         }
         
@@ -1034,12 +1088,12 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
         .auto-approve-toggle-text {
             flex: 1;
             font-size: 12px;
-            color: #888;
+            color: var(--vscode-foreground, #cccccc);
         }
         
         .auto-approve-count {
-            background: #007acc;
-            color: white;
+            background: var(--vscode-badge-background, #007acc);
+            color: var(--vscode-badge-foreground, #ffffff);
             font-size: 11px;
             padding: 2px 6px;
             border-radius: 10px;
@@ -1048,16 +1102,17 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
         }
         
         .auto-approve-count.zero {
-            background: #444;
-            color: #888;
+            background: var(--vscode-disabledForeground, #666);
+            color: var(--vscode-foreground, #888);
         }
         
+        /* Cline风格权限项 */
         .permission-item {
             display: flex;
-            align-items: flex-start;
+            align-items: center;
             gap: 10px;
-            padding: 8px 0;
-            border-bottom: 1px solid #2a2d2e;
+            padding: 6px 0;
+            border-bottom: 1px solid var(--vscode-panel-border, #2a2d2e);
         }
         
         .permission-item:last-child {
@@ -1065,9 +1120,8 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
         }
         
         .permission-checkbox {
-            margin-top: 2px;
             cursor: pointer;
-            accent-color: #007acc;
+            accent-color: var(--vscode-focusBorder, #007fd4);
         }
         
         .permission-info {
@@ -1075,44 +1129,45 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
         }
         
         .permission-label {
-            font-size: 13px;
-            color: #cccccc;
-            margin-bottom: 2px;
+            font-size: 12px;
+            color: var(--vscode-foreground, #cccccc);
         }
         
         .permission-desc {
             font-size: 11px;
-            color: #666;
+            color: var(--vscode-descriptionForeground, #888);
+            margin-top: 2px;
         }
         
         .permission-item.enabled .permission-label {
-            color: #4fc3f7;
+            color: var(--vscode-textLink-foreground, #3794ff);
         }
         
-        /* YOLO Mode */
+        /* Cline风格YOLO Mode */
         .yolo-mode-section {
             margin-top: 12px;
             padding-top: 12px;
-            border-top: 1px solid #444;
+            border-top: 1px solid var(--vscode-panel-border, #3e3e42);
         }
         
         .yolo-mode-toggle {
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 8px;
-            background: #3a1d1d;
-            border-radius: 4px;
+            padding: 8px 12px;
+            background: rgba(248, 81, 73, 0.1);
+            border: 1px solid rgba(248, 81, 73, 0.3);
+            border-radius: 3px;
             cursor: pointer;
         }
         
         .yolo-mode-toggle:hover {
-            background: #4a2d2d;
+            background: rgba(248, 81, 73, 0.15);
         }
         
         .yolo-mode-toggle label {
-            color: #f44336;
-            font-size: 13px;
+            color: #f85149;
+            font-size: 12px;
             font-weight: 500;
             cursor: pointer;
         }
@@ -1120,8 +1175,8 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
         .yolo-warning {
             font-size: 11px;
             color: #ff9800;
-            margin-top: 4px;
-            padding-left: 24px;
+            margin-top: 6px;
+            padding-left: 28px;
         }
         
         /* Cline 精确复制 - 工具调用卡片 */
@@ -1392,21 +1447,21 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
             color: #888;
         }
         
-        /* 任务步骤 */
+        /* Cline风格任务步骤 */
         .task-steps {
-            margin: 12px 0;
-            padding: 12px;
-            background: #1e1e1e;
-            border-radius: 6px;
-            border: 1px solid #333;
+            margin: 8px 0;
+            padding: 8px 12px;
+            background: var(--vscode-editor-background, #1e1e1e);
+            border: 1px solid var(--vscode-panel-border, #3e3e42);
+            border-radius: 3px;
         }
         
         .task-step {
             display: flex;
             align-items: center;
             gap: 8px;
-            padding: 6px 0;
-            border-bottom: 1px solid #2a2d2e;
+            padding: 4px 0;
+            border-bottom: 1px solid var(--vscode-panel-border, #2a2d2e);
         }
         
         .task-step:last-child {
@@ -1414,22 +1469,23 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
         }
         
         .task-step-icon {
-            width: 16px;
-            height: 16px;
+            width: 14px;
+            height: 14px;
             display: flex;
             align-items: center;
             justify-content: center;
+            font-size: 11px;
         }
         
-        .task-step-icon.pending { color: #888; }
-        .task-step-icon.executing { color: #007acc; }
+        .task-step-icon.pending { color: var(--vscode-descriptionForeground, #888); }
+        .task-step-icon.executing { color: var(--vscode-progressBar-background, #007acc); }
         .task-step-icon.completed { color: #2ea043; }
-        .task-step-icon.failed { color: #da3633; }
+        .task-step-icon.failed { color: #f85149; }
         
         .task-step-content {
             flex: 1;
             font-size: 12px;
-            color: #ccc;
+            color: var(--vscode-foreground, #cccccc);
         }
     </style>
 </head>
@@ -1437,20 +1493,16 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
     <!-- 导航栏 -->
     <div class="nav-bar">
         <button class="nav-tab active" data-view="chat" data-action="switch-view">
-            <span>💬</span>
-            <span>聊天</span>
+            <span>Chat</span>
         </button>
         <button class="nav-tab" data-view="tasks" data-action="switch-view">
-            <span>🗂️</span>
-            <span>任务</span>
+            <span>Tasks</span>
         </button>
         <button class="nav-tab" data-view="settings" data-action="switch-view">
-            <span>⚙️</span>
-            <span>设置</span>
+            <span>Settings</span>
         </button>
         <button class="nav-tab" data-view="history" data-action="switch-view">
-            <span>📜</span>
-            <span>历史</span>
+            <span>History</span>
         </button>
     </div>
     
@@ -1460,66 +1512,69 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
         <div class="chat-view active" id="chatView">
             <!-- 消息容器 -->
             <div class="messages-container" id="messagesContainer">
-                <!-- 初始消息 -->
+                <!-- Initial message -->
                 <div class="message assistant">
                     <div class="message-header">
                         <span class="role">CodeLine</span>
                         <span class="time">${new Date().toLocaleTimeString()}</span>
                     </div>
                     <div class="message-content">
-                        你好！我是CodeLine助手。有什么可以帮您的？
+                        Hi! I'm CodeLine. How can I help you today?
                     </div>
                 </div>
             </div>
             
-            <!-- 自动批准设置 - 放在输入框上方，参考Cline设计 -->
+            <!-- Auto-approve settings - above input, Cline style -->
             <div class="auto-approve-toggle" id="autoApproveToggle" data-action="toggle-auto-approve-panel">
                 <span class="auto-approve-toggle-icon">▼</span>
-                <span class="auto-approve-toggle-text">自动批准权限</span>
+                <span class="auto-approve-toggle-text">Auto-approve Settings</span>
                 <span class="auto-approve-count zero" id="autoApproveCount">0</span>
             </div>
             <div class="auto-approve-panel" id="autoApprovePanel">
                 <div class="auto-approve-content">
                     <div class="auto-approve-header">
-                        <h4>权限设置</h4>
+                        <h4>Permissions</h4>
                     </div>
                     <div id="autoApproveOptions">
-                        <!-- 权限选项将通过JavaScript动态生成 -->
+                        <!-- Permission options will be generated dynamically -->
                     </div>
                     <div class="yolo-mode-section">
                         <div class="yolo-mode-toggle">
                             <input type="checkbox" id="yoloMode" data-action="toggle-yolo-mode">
-                            <label for="yoloMode">🔥 YOLO Mode (自动批准所有)</label>
+                            <label for="yoloMode">YOLO Mode (Auto-approve all)</label>
                         </div>
-                        <div class="yolo-warning">⚠️ 危险：将自动批准所有操作，包括文件删除等高风险操作</div>
+                        <div class="yolo-warning">Warning: Will auto-approve all operations, including high-risk actions like file deletion</div>
                     </div>
                 </div>
             </div>
             
-            <!-- 输入区域 -->
+            <!-- 输入区域 - Cline风格 -->
             <div class="input-area">
                 <div class="input-wrapper">
                     <textarea 
                         id="messageInput" 
-                        placeholder="输入消息... (Enter发送，Shift+Enter换行)"
+                        placeholder="Type a message... (Enter to send, Shift+Enter for new line)"
                         rows="1"></textarea>
-                    <button class="send-button" id="sendButton">发送</button>
+                    <div class="input-actions">
+                        <button class="input-action-btn" data-action="add-context" title="Add context">@</button>
+                        <button class="send-button" id="sendButton">Send</button>
+                    </div>
                 </div>
             </div>
         </div>
         
         <!-- 设置视图 -->
         <div class="settings-view" id="settingsView">
-            <h2 class="settings-title">设置</h2>
+            <h2 class="settings-title">Settings</h2>
             
             <div class="settings-section">
                 <h3>API 配置</h3>
                 <div class="settings-group">
-                    <label class="settings-label">API 密钥</label>
-                    <input type="password" class="settings-input" id="apiKey" placeholder="输入您的API密钥">
+                    <label class="settings-label">API Key</label>
+                    <input type="password" class="settings-input" id="apiKey" placeholder="Enter your API key">
                 </div>
                 <div class="settings-group">
-                    <label class="settings-label">模型提供者</label>
+                    <label class="settings-label">Provider</label>
                     <select class="settings-input" id="modelProvider">
                         <option value="openai">OpenAI</option>
                         <option value="anthropic">Anthropic</option>
@@ -1527,42 +1582,42 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
                     </select>
                 </div>
                 <div class="settings-group">
-                    <label class="settings-label">模型名称</label>
-                    <input type="text" class="settings-input" id="modelName" placeholder="例如: gpt-4-turbo">
+                    <label class="settings-label">Model</label>
+                    <input type="text" class="settings-input" id="modelName" placeholder="e.g., gpt-4-turbo">
                 </div>
-                <button class="settings-button" data-action="save-settings">保存设置</button>
-                <button class="settings-button secondary" data-action="test-connection">测试连接</button>
+                <button class="settings-button" data-action="save-settings">Save Settings</button>
+                <button class="settings-button secondary" data-action="test-connection">Test Connection</button>
             </div>
             
             <div class="settings-section">
-                <h3>聊天管理</h3>
-                <button class="settings-button" data-action="clear-chat">清除聊天记录</button>
+                <h3>Chat Management</h3>
+                <button class="settings-button" data-action="clear-chat">Clear Chat History</button>
             </div>
             
             <div class="settings-section">
-                <h3>自动批准设置</h3>
-                <p style="color: #888; margin-bottom: 15px; font-size: 14px;">
-                    配置哪些操作可以自动批准，无需手动确认。
+                <h3>Auto-Approve Settings</h3>
+                <p style="color: var(--vscode-descriptionForeground, #888); margin-bottom: 15px; font-size: 12px;">
+                    Configure which operations can be auto-approved without manual confirmation.
                 </p>
                 <div id="autoApproveOptions">
-                    <!-- 自动批准选项将通过JavaScript动态生成 -->
+                    <!-- Auto-approve options will be generated dynamically -->
                 </div>
-                <button class="settings-button" data-action="save-auto-approve">保存自动批准设置</button>
+                <button class="settings-button" data-action="save-auto-approve">Save Auto-Approve Settings</button>
             </div>
         </div>
         
-        <!-- 任务视图和历史视图占位 -->
+        <!-- Tasks and History views -->
         <div class="settings-view" id="tasksView">
-            <h2 class="settings-title">任务管理</h2>
-            <p style="color: #888; padding: 20px; text-align: center;">
-                任务管理功能开发中...
+            <h2 class="settings-title">Tasks</h2>
+            <p style="color: var(--vscode-descriptionForeground, #888); padding: 20px; text-align: center; font-size: 13px;">
+                Task management coming soon...
             </p>
         </div>
         
         <div class="settings-view" id="historyView">
-            <h2 class="settings-title">历史记录</h2>
-            <p style="color: #888; padding: 20px; text-align: center;">
-                历史记录功能开发中...
+            <h2 class="settings-title">History</h2>
+            <p style="color: var(--vscode-descriptionForeground, #888); padding: 20px; text-align: center; font-size: 13px;">
+                History feature coming soon...
             </p>
         </div>
     </div>
@@ -1710,48 +1765,48 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
             const options = [
                 {
                     id: 'readFiles',
-                    label: '读取项目文件',
-                    description: '允许读取工作目录中的文件和目录'
+                    label: 'Read Files',
+                    description: 'Allow reading files in the workspace'
                 },
                 {
                     id: 'readFilesExternally',
-                    label: '读取所有文件',
-                    description: '允许读取工作目录外部的文件'
+                    label: 'Read Files Outside Workspace',
+                    description: 'Allow reading files outside the workspace'
                 },
                 {
                     id: 'editFiles',
-                    label: '编辑项目文件',
-                    description: '允许编辑工作目录中的文件'
+                    label: 'Edit Files',
+                    description: 'Allow editing files in the workspace'
                 },
                 {
                     id: 'editFilesExternally',
-                    label: '编辑所有文件',
-                    description: '允许编辑工作目录外部的文件'
+                    label: 'Edit Files Outside Workspace',
+                    description: 'Allow editing files outside the workspace'
                 },
                 {
                     id: 'executeSafeCommands',
-                    label: '执行安全命令',
-                    description: '允许执行被标记为安全的命令'
+                    label: 'Execute Safe Commands',
+                    description: 'Allow executing safe terminal commands'
                 },
                 {
                     id: 'executeAllCommands',
-                    label: '执行所有命令',
-                    description: '允许执行所有命令（包括潜在危险的命令）'
+                    label: 'Execute All Commands',
+                    description: 'Allow executing all terminal commands'
                 },
                 {
                     id: 'useBrowser',
-                    label: '使用浏览器',
-                    description: '允许使用浏览器进行网页操作'
+                    label: 'Use Browser',
+                    description: 'Allow using the browser for web operations'
                 },
                 {
                     id: 'useMcp',
-                    label: '使用MCP服务器',
-                    description: '允许使用MCP（Model Context Protocol）服务器'
+                    label: 'Use MCP Servers',
+                    description: 'Allow using MCP (Model Context Protocol) servers'
                 },
                 {
                     id: 'enableNotifications',
-                    label: '启用通知',
-                    description: '显示批准和任务完成的通知'
+                    label: 'Enable Notifications',
+                    description: 'Show notifications for approvals and task completion'
                 }
             ];
             
@@ -1917,6 +1972,16 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
                     vscode.postMessage({ command: 'test', data: '清除聊天记录' });
                     break;
                     
+                case 'add-context':
+                    console.log('添加上下文');
+                    // 在输入框中添加@符号
+                    const input = document.getElementById('messageInput');
+                    if (input) {
+                        input.value += '@';
+                        input.focus();
+                    }
+                    break;
+                    
                 case 'save-auto-approve':
                     console.log('保存自动批准设置');
                     vscode.postMessage({ command: 'test', data: '保存自动批准设置' });
@@ -1996,33 +2061,67 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
                     
                 case 'approve-all-diffs':
                     console.log('批准所有差异');
+                    // 处理Cline风格卡片
+                    document.querySelectorAll('.cline-tool-card').forEach(function(card) {
+                        if (!card.classList.contains('saved') && !card.classList.contains('rejected')) {
+                            card.classList.add('saved');
+                            card.classList.remove('expanded');
+                            // 禁用按钮
+                            var buttons = card.querySelectorAll('.cline-btn');
+                            buttons.forEach(function(btn) {
+                                btn.disabled = true;
+                                btn.style.opacity = '0.5';
+                            });
+                        }
+                    });
+                    // 处理旧版diff容器
                     document.querySelectorAll('.diff-preview-container').forEach(function(container) {
                         if (!container.classList.contains('diff-approved') && !container.classList.contains('diff-rejected')) {
                             container.classList.add('diff-approved');
                         }
                     });
+                    // 发送消息
                     document.querySelectorAll('[data-action="approve-diff"]').forEach(function(btn) {
-                        vscode.postMessage({ 
-                            command: 'approveDiff', 
-                            diffId: btn.dataset.diffId, 
-                            action: 'approve' 
-                        });
+                        if (!btn.disabled) {
+                            vscode.postMessage({ 
+                                command: 'approveDiff', 
+                                diffId: btn.dataset.diffId, 
+                                action: 'approve' 
+                            });
+                        }
                     });
                     break;
                     
                 case 'reject-all-diffs':
                     console.log('拒绝所有差异');
+                    // 处理Cline风格卡片
+                    document.querySelectorAll('.cline-tool-card').forEach(function(card) {
+                        if (!card.classList.contains('saved') && !card.classList.contains('rejected')) {
+                            card.classList.add('rejected');
+                            card.classList.remove('expanded');
+                            // 禁用按钮
+                            var buttons = card.querySelectorAll('.cline-btn');
+                            buttons.forEach(function(btn) {
+                                btn.disabled = true;
+                                btn.style.opacity = '0.5';
+                            });
+                        }
+                    });
+                    // 处理旧版diff容器
                     document.querySelectorAll('.diff-preview-container').forEach(function(container) {
                         if (!container.classList.contains('diff-approved') && !container.classList.contains('diff-rejected')) {
                             container.classList.add('diff-rejected');
                         }
                     });
+                    // 发送消息
                     document.querySelectorAll('[data-action="reject-diff"]').forEach(function(btn) {
-                        vscode.postMessage({ 
-                            command: 'approveDiff', 
-                            diffId: btn.dataset.diffId, 
-                            action: 'reject' 
-                        });
+                        if (!btn.disabled) {
+                            vscode.postMessage({ 
+                                command: 'approveDiff', 
+                                diffId: btn.dataset.diffId, 
+                                action: 'reject' 
+                            });
+                        }
                     });
                     break;
             }
