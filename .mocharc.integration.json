@@ -1,12 +1,12 @@
 {
-  "extension": ["ts", "js"],
+  "extension": ["js"],
   "spec": [
-    "out/test/suite/taskExecutionIntegration.test.js",
-    "out/test/suite/pluginManager.test.js"
+    "out/test/integration/**/*.test.js"
   ],
   "require": ["src/test/setupTestEnv.js"],
-  "timeout": 15000,
+  "timeout": 20000,
   "colors": true,
   "reporter": "spec",
-  "exit": true
+  "exit": true,
+  "recursive": true
 }

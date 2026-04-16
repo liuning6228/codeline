@@ -1,15 +1,12 @@
 {
-  "extension": ["ts", "js"],
+  "extension": ["js"],
   "spec": [
-    "out/test/suite/fileManager.test.js",
-    "out/test/suite/modelAdapter.test.js",
-    "out/test/suite/taskEngine.test.js",
-    "out/test/suite/pluginExtension.test.js",
-    "out/test/suite/pluginManager.test.js"
+    "out/test/unit/**/*.test.js"
   ],
   "require": ["src/test/setupTestEnv.js"],
-  "timeout": 5000,
+  "timeout": 10000,
   "colors": true,
   "reporter": "spec",
-  "exit": true
+  "exit": true,
+  "recursive": true
 }
