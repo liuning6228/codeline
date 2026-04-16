@@ -56,22 +56,31 @@ function copyJsTestFiles(dir, baseDir = '') {
 
 // 复制helper文件
 function copyHelperFiles() {
-  const helpersDir = path.join(testDir, 'helpers');
+  // 尝试从多个位置复制helper文件
+  const possibleHelperDirs = [
+    path.join(projectRoot, 'test', 'helpers'),      // test/helpers/
+    path.join(projectRoot, 'src', 'test', 'helpers'), // src/test/helpers/
+    path.join(projectRoot, 'test', 'helpers'),       // 原始位置
+  ];
+  
   const outHelpersDir = path.join(outTestDir, 'helpers');
   
-  if (fs.existsSync(helpersDir)) {
-    if (!fs.existsSync(outHelpersDir)) {
-      fs.mkdirSync(outHelpersDir, { recursive: true });
-    }
-    
-    const helperFiles = fs.readdirSync(helpersDir);
-    for (const file of helperFiles) {
-      if (file.endsWith('.js') || file.endsWith('.json')) {
-        const srcFile = path.join(helpersDir, file);
-        const destFile = path.join(outHelpersDir, file);
-        fs.copyFileSync(srcFile, destFile);
-        console.log(`📄 复制辅助文件: ${file}`);
+  for (const helpersDir of possibleHelperDirs) {
+    if (fs.existsSync(helpersDir)) {
+      if (!fs.existsSync(outHelpersDir)) {
+        fs.mkdirSync(outHelpersDir, { recursive: true });
       }
+      
+      const helperFiles = fs.readdirSync(helpersDir);
+      for (const file of helperFiles) {
+        if (file.endsWith('.js') || file.endsWith('.json')) {
+          const srcFile = path.join(helpersDir, file);
+          const destFile = path.join(outHelpersDir, file);
+          fs.copyFileSync(srcFile, destFile);
+          console.log(`📄 从 ${helpersDir} 复制辅助文件: ${file}`);
+        }
+      }
+      break; // 找到第一个有效目录就停止
     }
   }
 }
