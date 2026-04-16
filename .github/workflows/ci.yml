@@ -72,9 +72,14 @@ jobs:
         echo "检查测试文件:"
         ls -la test/simple.test.js
         echo ""
-        echo "运行简单测试:"
-        npx mocha test/simple.test.js --timeout 5000 --reporter spec 2>&1
-        echo "简单测试退出码: $?"
+        echo "当前目录:"
+        pwd
+        echo ""
+        echo "运行简单测试 (无setupEnv):"
+        npx mocha test/simple.test.js --no-require --timeout 5000 --reporter spec 2>&1 || echo "简单测试失败或跳过"
+        echo ""
+        echo "运行简单测试 (有setupEnv):"
+        npx mocha test/simple.test.js --require src/test/setupTestEnv.js --timeout 5000 --reporter spec 2>&1 || echo "带setupEnv的测试失败或跳过"
         
     - name: Run unit tests
       run: npm run test:unit

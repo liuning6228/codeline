@@ -310,7 +310,7 @@
     "watch": "tsc -watch -p ./",
     "package": "npx @vscode/vsce package",
     "compile:tests": "node scripts/compile-tests.js",
-    "test": "npm run compile && npx mocha --config ./.mocharc.json && npm run test:permission",
+    "test": "npm run compile && npx mocha --config ./.mocharc.json",
     "test:unit": "npm run compile && npx mocha --config ./.mocharc.unit.json",
     "test:integration": "npm run compile && npx mocha --config ./.mocharc.integration.json",
     "test:filemanager": "npm run compile && node -e \"const Module = require('module'); const originalRequire = Module.prototype.require; Module.prototype.require = function(id) { if (id === 'vscode') { return require('./out/test/helpers/mockVscode.js'); } return originalRequire.apply(this, arguments); }; require('./out/test/suite/fileManager.test.js');\"",

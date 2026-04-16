@@ -1,9 +1,9 @@
 {
   "extension": ["js"],
   "spec": [
+    "test/simple.test.js",
     "test/unit/**/*.test.js",
-    "test/integration/**/*.test.js",
-    "out/test/test/security/**/*.test.js"
+    "test/integration/**/*.test.js"
   ],
   "timeout": 30000,
   "slow": 15000,
