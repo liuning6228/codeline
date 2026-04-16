@@ -46,7 +46,7 @@ jobs:
         echo "工作目录: $(pwd)"
         echo "GITHUB_WORKSPACE: ${GITHUB_WORKSPACE}"
         echo "当前目录内容:"
-        ls -la | head -20
+        ls -la 2>/dev/null | head -20 || true
         
         # 检查是否有openclaw残留文件
         if [ -d "openclaw" ] || [ -f "openclaw" ]; then
