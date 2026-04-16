@@ -1,0 +1,1 @@
+{"version":3,"file":"types.d.ts","sourceRoot":"","sources":["../../../src/shared/multi-root/types.ts"],"names":[],"mappings":"AAAA;;GAEG;AAEH,oBAAY,OAAO;IAClB,IAAI,SAAS;IACb,GAAG,QAAQ;IACX,SAAS,cAAc;CACvB;AAED,MAAM,WAAW,aAAa;IAC7B,IAAI,EAAE,MAAM,CAAA;IACZ,IAAI,CAAC,EAAE,MAAM,CAAA;IACb,GAAG,EAAE,OAAO,CAAA;IACZ,UAAU,CAAC,EAAE,MAAM,CAAA;CACnB"}

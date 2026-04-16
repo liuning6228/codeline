@@ -1,0 +1,1 @@
+{"version":3,"file":"requesty.d.ts","sourceRoot":"","sources":["../../../src/shared/clients/requesty.ts"],"names":[],"mappings":"AAEA,KAAK,OAAO,GAAG,QAAQ,GAAG,KAAK,GAAG,KAAK,CAAA;AAUvC,eAAO,MAAM,oBAAoB,GAAI,UAAU,MAAM,EAAE,UAAS,OAAkB,KAAG,GAAG,GAAG,SAQ1F,CAAA;AAED,eAAO,MAAM,0BAA0B,GAAI,UAAU,MAAM,EAAE,UAAS,OAAkB,KAAG,MAAM,GAAG,SAEnG,CAAA"}

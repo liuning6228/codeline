@@ -1,0 +1,1 @@
+{"version":3,"file":"api.d.ts","sourceRoot":"","sources":["../../../src/shared/cline/api.ts"],"names":[],"mappings":"AAAA,aAAK,wBAAwB;IAC5B,IAAI,2BAA2B;IAC/B,aAAa,yBAAyB;CACtC;AAED,aAAK,qBAAqB;IACzB,cAAc,uBAAuB;IACrC,SAAS,qBAAqB;IAC9B,cAAc,iCAAiC;IAC/C,aAAa,6CAA6C;IAC1D,QAAQ,wCAAwC;CAChD;AAED,eAAO,MAAM,kBAAkB;;;;;;;;CAG9B,CAAA"}

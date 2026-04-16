@@ -1,0 +1,1 @@
+{"version":3,"file":"MCPMessage.d.ts","sourceRoot":"","sources":["../../src/mcp/MCPMessage.ts"],"names":[],"mappings":"AAAA;;;GAGG;AAEH,MAAM,WAAW,UAAU;IACzB,WAAW;IACX,IAAI,EAAE,MAAM,CAAC;IAEb,WAAW;IACX,IAAI,EAAE,MAAM,CAAC,MAAM,EAAE,GAAG,CAAC,CAAC;IAE1B,eAAe;IACf,SAAS,CAAC,EAAE,MAAM,CAAC;IAEnB,cAAc;IACd,SAAS,CAAC,EAAE,MAAM,CAAC;CACpB"}

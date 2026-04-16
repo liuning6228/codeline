@@ -1,0 +1,1 @@
+{"version":3,"file":"config-types.d.ts","sourceRoot":"","sources":["../../src/shared/config-types.ts"],"names":[],"mappings":"AAAA;;;GAGG;AAEH,oBAAY,WAAW;IACtB,UAAU,eAAe;IACzB,OAAO,YAAY;IACnB,KAAK,UAAU;IACf,UAAU,eAAe;CACzB;AAED,MAAM,WAAW,iBAAiB;IACjC,WAAW,EAAE,WAAW,CAAA;IACxB,UAAU,EAAE,MAAM,CAAA;IAClB,UAAU,EAAE,MAAM,CAAA;IAClB,UAAU,EAAE,MAAM,CAAA;CAClB"}
