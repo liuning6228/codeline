@@ -1,0 +1,62 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "commonjs",
+    "lib": [
+      "ES2022",
+      "DOM"
+    ],
+    "outDir": "./out/test",
+    "rootDir": "./",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "sourceMap": true,
+    "downlevelIteration": true,
+    "types": [
+      "node",
+      "mocha",
+      "chai"
+    ],
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "@shared/*": [
+        "./src/shared/*"
+      ],
+      "@tools/*": [
+        "./src/tools/*"
+      ],
+      "@core/*": [
+        "./src/core/*"
+      ],
+      "@mcp/*": [
+        "./src/mcp/*"
+      ]
+    }
+  },
+  "include": [
+    "test/integration/core/tool/EnhancedToolRegistry.test.ts",
+    "test/integration/core/tool/SimpleIntegration.test.ts",
+    "test/integration/core/tool/permission/PermissionSystem.test.ts",
+    "test/mcp/MCPEndToEnd.test.ts",
+    "test/mcp/production/MCPHandlerProduction.test.ts",
+    "test/security/permission-tests/CommandClassifierComprehensive.test.ts",
+    "test/security/permission-tests/CompletePermissionWorkflow.test.ts",
+    "test/security/permission-tests/PermissionDialogComprehensive.test.ts",
+    "test/security/permission-tests/PermissionSystem.test.ts",
+    "test/security/permission-tests/RuleManagerComprehensive.test.ts",
+    "test/unit/core/tool/EnhancedBaseTool.test.ts",
+    "test/unit/core/tool/permission/PermissionDecisionEngine.test.ts",
+    "test/unit/core/tool/permission/PermissionManager.test.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "out",
+    "webview-ui"
+  ]
+}
