@@ -1,7 +1,7 @@
 {
   "extension": ["js"],
   "spec": [
-    "out/test/integration/**/*.test.js"
+    "test/integration/**/*.test.js"
   ],
   "require": ["src/test/setupTestEnv.js"],
   "timeout": 20000,

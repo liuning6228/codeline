@@ -1,8 +1,8 @@
 {
   "extension": ["js"],
   "spec": [
-    "out/test/unit/**/*.test.js",
-    "out/test/integration/**/*.test.js",
+    "test/unit/**/*.test.js",
+    "test/integration/**/*.test.js",
     "out/test/test/security/**/*.test.js"
   ],
   "timeout": 30000,
