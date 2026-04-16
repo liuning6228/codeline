@@ -17,7 +17,7 @@ const {
   unifiedSafeParse,
   compatibility,
   ZodError
-} = require('../../../../out/core/tool/ZodCompatibility');
+} = require('../../../../core/tool/ZodCompatibility');
 
 describe('Zod Compatibility Layer', () => {
   describe('基础功能测试', () => {
