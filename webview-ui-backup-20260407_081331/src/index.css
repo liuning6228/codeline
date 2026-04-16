@@ -1,0 +1,152 @@
+@import 'tailwindcss';
+@import './styles/theme.css';
+
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  font-family: var(--font-base);
+  font-size: var(--text-base);
+  background: var(--vscode-sideBar-background);
+  color: var(--vscode-foreground);
+  overflow: hidden;
+  height: 100vh;
+}
+
+#root {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Navigation styles */
+nav {
+  flex-wrap: wrap;
+  min-height: 48px;
+  gap: 0.5rem;
+}
+
+/* Responsive navigation */
+@media (max-width: 1024px) {
+  nav {
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+  }
+  
+  nav > div:first-child {
+    flex-wrap: wrap;
+    gap: 0.25rem;
+  }
+}
+
+@media (max-width: 800px) {
+  nav {
+    flex-direction: column;
+    align-items: stretch;
+    padding-top: 0.5rem;
+    padding-bottom: 0.5rem;
+    gap: 0.5rem;
+  }
+  
+  nav > div:first-child {
+    justify-content: center;
+  }
+  
+  nav .ml-auto {
+    margin-left: 0 !important;
+    justify-content: center;
+    width: 100%;
+  }
+}
+
+/* Button styles */
+button {
+  transition: background-color 0.15s ease-in-out, border-color 0.15s ease-in-out;
+  cursor: pointer;
+}
+
+button:hover {
+  background-color: var(--vscode-toolbar-hoverBackground) !important;
+}
+
+button:focus {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+/* Input focus styles */
+input:focus,
+textarea:focus,
+select:focus {
+  outline: 2px solid var(--vscode-focusBorder);
+  outline-offset: 2px;
+  border-color: var(--vscode-focusBorder) !important;
+}
+
+/* Navigation button styles */
+nav button {
+  min-width: 60px;
+  text-align: center;
+}
+
+nav button.bg-primary {
+  box-shadow: 0 0 0 1px var(--vscode-button-background);
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--vscode-scrollbarSlider-background, rgba(121, 121, 121, 0.4));
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--vscode-scrollbarSlider-hoverBackground, rgba(121, 121, 121, 0.7));
+}
+
+/* Code block styling */
+pre {
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-editor-size);
+}
+
+code {
+  font-family: var(--font-mono);
+}
+
+/* Link styling */
+a {
+  color: var(--vscode-textLink-foreground);
+  text-decoration: none;
+}
+
+a:hover {
+  color: var(--vscode-textLink-activeForeground);
+  text-decoration: underline;
+}
+
+/* Selection */
+::selection {
+  background: var(--vscode-editor-selectionBackground, rgba(255, 255, 255, 0.2));
+}

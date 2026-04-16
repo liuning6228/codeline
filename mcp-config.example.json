@@ -1,0 +1,68 @@
+{
+  "mcpConfig": {
+    "enableMCPTools": true,
+    "enableToolSystem": true,
+    "verboseLogging": false,
+    "defaultTimeout": 30000,
+    "maxRetries": 3,
+    "enableMonitoring": true,
+    "monitoringSampleRate": 0.1,
+    "autoLoadConfigPath": ".mcp/config.json"
+  },
+  "servers": [
+    {
+      "name": "filesystem-server",
+      "command": "npx @modelcontextprotocol/server-filesystem",
+      "args": ["."],
+      "enabled": true,
+      "autoStart": true
+    },
+    {
+      "name": "git-server",
+      "command": "npx @modelcontextprotocol/server-git",
+      "args": ["."],
+      "enabled": false,
+      "autoStart": false
+    }
+  ],
+  "tools": {
+    "builtin": {
+      "time-current": {
+        "enabled": true,
+        "permissionLevel": "READ"
+      },
+      "math-calculator": {
+        "enabled": true,
+        "permissionLevel": "READ"
+      },
+      "unit-converter": {
+        "enabled": true,
+        "permissionLevel": "READ"
+      }
+    },
+    "thirdParty": {
+      "search-tools": {
+        "enabled": true,
+        "provider": "search"
+      }
+    }
+  },
+  "security": {
+    "allowedOrigins": ["vscode://*", "file://*"],
+    "requireAuthentication": false,
+    "maxConnections": 10
+  },
+  "monitoring": {
+    "enableMetrics": true,
+    "metricsPort": 9090,
+    "enableHealthChecks": true,
+    "healthCheckInterval": 30000
+  },
+  "logging": {
+    "level": "info",
+    "output": "console",
+    "rotateLogs": true,
+    "maxLogSize": "10MB",
+    "retentionDays": 7
+  }
+}

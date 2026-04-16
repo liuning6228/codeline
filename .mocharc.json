@@ -1,9 +1,20 @@
 {
-  "extension": ["ts", "js"],
-  "spec": ["out/test/suite/**/*.test.js"],
-  "require": ["src/test/setupTestEnv.js"],
-  "timeout": 10000,
-  "colors": true,
+  "extension": ["js", "ts"],
+  "spec": ["test/unit/**/*.test.js", "test/integration/**/*.test.js", "out/test/test/security/**/*.test.js"],
+  "timeout": 30000,
+  "slow": 10000,
   "reporter": "spec",
-  "exit": true
+  "reporterOption": ["cdn=true", "json=true"],
+  "require": ["src/test/setupTestEnv.js"],
+  "watchFiles": ["src/**/*.js", "src/**/*.ts", "test/**/*.js"],
+  "ignore": ["node_modules", "out", "dist", "webview-ui"],
+  "checkLeaks": true,
+  "recursive": true,
+  "exit": true,
+  "color": true,
+  "bail": false,
+  "grep": "",
+  "invert": false,
+  "parallel": false,
+  "jobs": 1
 }

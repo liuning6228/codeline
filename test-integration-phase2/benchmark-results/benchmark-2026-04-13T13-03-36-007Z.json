@@ -1,0 +1,160 @@
+{
+  "timestamp": "2026-04-13T13:03:36.007Z",
+  "suites": [
+    {
+      "name": "EnhancedEngineAdapter",
+      "tests": [
+        {
+          "name": "应该能够创建模拟依赖实例",
+          "passed": true,
+          "time": 1
+        },
+        {
+          "name": "模拟依赖应该具有正确的方法签名",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够注册和获取工具",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够按类别获取工具",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够执行工具",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够分析项目",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够获取文件上下文",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够生成提示词",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够解析响应",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够创建EnhancedEngineAdapter模拟实例",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够初始化并提交消息",
+          "passed": true,
+          "time": 101
+        }
+      ],
+      "passed": 11,
+      "failed": 0,
+      "time": 105
+    },
+    {
+      "name": "EnhancedEngineAdapterE2E",
+      "tests": [
+        {
+          "name": "应该成功初始化适配器",
+          "passed": true,
+          "time": 101
+        },
+        {
+          "name": "应该获取到EnhancedQueryEngine实例",
+          "passed": true,
+          "time": 100
+        },
+        {
+          "name": "应该获取到工具注册表",
+          "passed": true,
+          "time": 100
+        },
+        {
+          "name": "应该处理简单的消息",
+          "passed": true,
+          "time": 101
+        },
+        {
+          "name": "应该处理需要工具调用的消息",
+          "passed": true,
+          "time": 101
+        },
+        {
+          "name": "应该支持模式切换",
+          "passed": true,
+          "time": 101
+        },
+        {
+          "name": "应该支持对话导出导入",
+          "passed": true,
+          "time": 101
+        },
+        {
+          "name": "MCPHandler应该能够处理健康检查",
+          "passed": true,
+          "time": 201
+        },
+        {
+          "name": "MCPHandler应该能够获取工具列表",
+          "passed": true,
+          "time": 201
+        },
+        {
+          "name": "MCPHandler应该能够执行工具",
+          "passed": true,
+          "time": 401
+        },
+        {
+          "name": "应该演示完整的MCP-Adapter集成工作流",
+          "passed": true,
+          "time": 201
+        },
+        {
+          "name": "应该处理无效的导入数据",
+          "passed": true,
+          "time": 100
+        },
+        {
+          "name": "应该在重置后保持基本功能",
+          "passed": true,
+          "time": 101
+        }
+      ],
+      "passed": 13,
+      "failed": 0,
+      "time": 1919
+    },
+    {
+      "name": "simple",
+      "tests": [
+        {
+          "name": "should pass",
+          "passed": true,
+          "time": 0
+        }
+      ],
+      "passed": 1,
+      "failed": 0,
+      "time": 1
+    }
+  ],
+  "totalTests": 25,
+  "passedTests": 25,
+  "failedTests": 0,
+  "totalTime": 2026,
+  "startTime": 1776085413980,
+  "endTime": 1776085416007
+}

@@ -1,115 +1,172 @@
 /**
- * Chat Types for CodeLine
- * Based on Cline's chat type system
+ * Shared types and interfaces for the chat view components
  */
 
-import type { RefObject, MutableRefObject } from 'react'
-import type { VirtuosoHandle } from 'react-virtuoso'
-import type { ClineMessage } from '@/context/ExtensionStateContext'
+import { ClineAsk, ClineMessage } from "@shared/ExtensionMessage"
+import { ListRange, VirtuosoHandle } from "react-virtuoso"
+import { ButtonActionType } from "../shared/buttonConfig"
+
+/**
+ * Main ChatView component props
+ */
+export interface ChatViewProps {
+	isHidden: boolean
+	showAnnouncement: boolean
+	hideAnnouncement: () => void
+	showHistoryView: () => void
+}
 
 /**
  * Chat state interface
  */
 export interface ChatState {
-  // Input state
-  inputValue: string
-  setInputValue: (value: string) => void
-  
-  // Quote/reply state
-  activeQuote: string | null
-  setActiveQuote: (quote: string | null) => void
-  
-  // Focus state
-  isTextAreaFocused: boolean
-  setIsTextAreaFocused: (focused: boolean) => void
-  
-  // Selection state
-  selectedImages: string[]
-  setSelectedImages: (images: string[]) => void
-  selectedFiles: string[]
-  setSelectedFiles: (files: string[]) => void
-  
-  // UI state
-  sendingDisabled: boolean
-  setSendingDisabled: (disabled: boolean) => void
-  enableButtons: boolean
-  setEnableButtons: (enabled: boolean) => void
-  primaryButtonText: string | undefined
-  setPrimaryButtonText: (text: string | undefined) => void
-  secondaryButtonText: string | undefined
-  setSecondaryButtonText: (text: string | undefined) => void
-  
-  // Expanded rows
-  expandedRows: Record<number, boolean>
-  setExpandedRows: (rows: Record<number, boolean>) => void
-  
-  // Refs
-  textAreaRef: RefObject<HTMLTextAreaElement>
-  
-  // Derived values
-  lastMessage: ClineMessage | undefined
-  secondLastMessage: ClineMessage | undefined
-  clineAsk: string | undefined
-  task: ClineMessage | undefined
-  
-  // Handlers
-  handleFocusChange: (isFocused: boolean) => void
-  clearExpandedRows: () => void
-  resetState: () => void
+	// State values
+	inputValue: string
+	setInputValue: React.Dispatch<React.SetStateAction<string>>
+	activeQuote: string | null
+	setActiveQuote: React.Dispatch<React.SetStateAction<string | null>>
+	isTextAreaFocused: boolean
+	setIsTextAreaFocused: React.Dispatch<React.SetStateAction<boolean>>
+	selectedImages: string[]
+	setSelectedImages: React.Dispatch<React.SetStateAction<string[]>>
+	selectedFiles: string[]
+	setSelectedFiles: React.Dispatch<React.SetStateAction<string[]>>
+	sendingDisabled: boolean
+	setSendingDisabled: React.Dispatch<React.SetStateAction<boolean>>
+	enableButtons: boolean
+	setEnableButtons: React.Dispatch<React.SetStateAction<boolean>>
+	primaryButtonText: string | undefined
+	setPrimaryButtonText: React.Dispatch<React.SetStateAction<string | undefined>>
+	secondaryButtonText: string | undefined
+	setSecondaryButtonText: React.Dispatch<React.SetStateAction<string | undefined>>
+	expandedRows: Record<number, boolean>
+	setExpandedRows: React.Dispatch<React.SetStateAction<Record<number, boolean>>>
+
+	// Refs
+	textAreaRef: React.RefObject<HTMLTextAreaElement>
+
+	// Derived values
+	lastMessage: ClineMessage | undefined
+	secondLastMessage: ClineMessage | undefined
+	clineAsk: ClineAsk | undefined
+	task: ClineMessage | undefined
+
+	// Handlers
+	handleFocusChange: (isFocused: boolean) => void
+	clearExpandedRows: () => void
+	resetState: () => void
+
+	// Scroll-related state (will be moved to scroll hook)
+	showScrollToBottom?: boolean
+	isAtBottom?: boolean
+	pendingScrollToMessage?: number | null
 }
 
 /**
  * Message handlers interface
  */
 export interface MessageHandlers {
-  handleSendMessage: (text: string, images: string[], files: string[]) => Promise<void>
-  executeButtonAction: (actionType: ButtonActionType, text?: string, images?: string[], files?: string[]) => Promise<void>
-  handleTaskCloseButtonClick: () => void
-  startNewTask: () => Promise<void>
+	executeButtonAction: (action: ButtonActionType, text?: string, images?: string[], files?: string[]) => Promise<void>
+	handleSendMessage: (text: string, images: string[], files: string[]) => Promise<void>
+	handleTaskCloseButtonClick: () => void
+	startNewTask: () => Promise<void>
 }
 
 /**
  * Scroll behavior interface
  */
 export interface ScrollBehavior {
-  virtuosoRef: RefObject<VirtuosoHandle>
-  scrollContainerRef: RefObject<HTMLDivElement>
-  disableAutoScrollRef: MutableRefObject<boolean>
-  scrollToBottomSmooth: () => void
-  scrollToBottomAuto: () => void
-  scrollToMessage: (messageIndex: number) => void
-  toggleRowExpansion: (ts: number) => void
-  handleRowHeightChange: (isTaller: boolean) => void
+	virtuosoRef: React.RefObject<VirtuosoHandle>
+	scrollContainerRef: React.RefObject<HTMLDivElement>
+	disableAutoScrollRef: React.MutableRefObject<boolean>
+	scrollToBottomSmooth: () => void
+	scrollToBottomAuto: () => void
+	scrollToMessage: (messageIndex: number) => void
+	toggleRowExpansion: (ts: number) => void
+	handleRowHeightChange: (isTaller: boolean) => void
+	showScrollToBottom: boolean
+	setShowScrollToBottom: React.Dispatch<React.SetStateAction<boolean>>
+	isAtBottom: boolean
+	setIsAtBottom: React.Dispatch<React.SetStateAction<boolean>>
+	pendingScrollToMessage: number | null
+	setPendingScrollToMessage: React.Dispatch<React.SetStateAction<number | null>>
+	scrolledPastUserMessage: ClineMessage | null
+	handleRangeChanged: (range: ListRange) => void
 }
 
 /**
- * Button action types
+ * Button state interface
  */
-export type ButtonActionType = 
-  | 'approve' 
-  | 'reject' 
-  | 'proceed' 
-  | 'retry' 
-  | 'cancel' 
-  | 'new_task' 
-  | 'utility'
-
-/**
- * Visible message group type
- */
-export type MessageGroup = ClineMessage | ClineMessage[]
-
-/**
- * Chat view props
- */
-export interface ChatViewProps {
-  isHidden?: boolean
+export interface ButtonState {
+	enableButtons: boolean
+	primaryButtonText: string | undefined
+	secondaryButtonText: string | undefined
 }
 
 /**
- * Message handler callback types
+ * Input state interface
  */
-export type AskResponseType = 
-  | 'messageResponse'
-  | 'yesButtonClicked'
-  | 'noButtonClicked'
+export interface InputState {
+	inputValue: string
+	selectedImages: string[]
+	selectedFiles: string[]
+	activeQuote: string | null
+	isTextAreaFocused: boolean
+}
+
+/**
+ * Task section props
+ */
+export interface TaskSectionProps {
+	task: ClineMessage
+	messages: ClineMessage[]
+	scrollBehavior: ScrollBehavior
+	buttonState: ButtonState
+	messageHandlers: MessageHandlers
+	chatState: ChatState
+	apiMetrics: {
+		totalTokensIn: number
+		totalTokensOut: number
+		totalCacheWrites?: number
+		totalCacheReads?: number
+		totalCost: number
+	}
+	lastApiReqTotalTokens?: number
+	selectedModelInfo: {
+		supportsPromptCache: boolean
+		supportsImages: boolean
+	}
+	isStreaming: boolean
+	clineAsk?: ClineAsk
+	modifiedMessages: ClineMessage[]
+}
+
+/**
+ * Welcome section props
+ */
+export interface WelcomeSectionProps {
+	showAnnouncement: boolean
+	hideAnnouncement: () => void
+	showHistoryView: () => void
+	telemetrySetting: string
+	version: string
+	taskHistory: any[]
+	shouldShowQuickWins: boolean
+}
+
+/**
+ * Input section props
+ */
+export interface InputSectionProps {
+	chatState: ChatState
+	messageHandlers: MessageHandlers
+	textAreaRef: React.RefObject<HTMLTextAreaElement>
+	onFocusChange: (isFocused: boolean) => void
+	onInputChange: (value: string) => void
+	onQuoteChange: (quote: string | null) => void
+	onImagesChange: (images: string[]) => void
+	onFilesChange: (files: string[]) => void
+	placeholderText: string
+	shouldDisableFilesAndImages: boolean
+	selectFilesAndImages: () => Promise<void>
+}

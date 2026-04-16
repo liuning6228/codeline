@@ -1,79 +1,140 @@
-/**
- * CodeLine Main Application
- * Based on Cline's multi-view architecture
- */
+import type { Boolean, EmptyRequest } from "@shared/proto/cline/common"
+import { useCallback, useEffect, useState } from "react"
+import AccountView from "./components/account/AccountView"
+import ChatViewWrapper from "./components/chat/ChatViewWrapper"
+import ClineKanbanLaunchModal, { CLINE_KANBAN_MODAL_DISMISS_ID } from "./components/common/ClineKanbanLaunchModal"
+import HistoryView from "./components/history/HistoryView"
+import McpView from "./components/mcp/configuration/McpConfigurationView"
+import OnboardingView from "./components/onboarding/OnboardingView"
+import SettingsView from "./components/settings/SettingsView"
+import WelcomeView from "./components/welcome/WelcomeView"
+import WorktreesView from "./components/worktrees/WorktreesView"
+import { useClineAuth } from "./context/ClineAuthContext"
+import { useExtensionState } from "./context/ExtensionStateContext"
+import { Providers } from "./Providers"
+import { GrpcAdapters } from "./adapters/cline-to-vscode"
 
-import React from 'react';
-import { ExtensionStateContextProvider, useExtensionState } from './context/ExtensionStateContext';
-import { ChatView } from './components/chat/chat-view';
+const AppContent = () => {
+	const {
+		didHydrateState,
+		showWelcome,
+		shouldShowAnnouncement,
+		dismissedBanners,
+		showMcp,
+		mcpTab,
+		showSettings,
+		settingsTargetSection,
+		showHistory,
+		showAccount,
+		showWorktrees,
+		showAnnouncement,
+		onboardingModels,
+		setShowAnnouncement,
+		setShouldShowAnnouncement,
+		closeMcpView,
+		navigateToHistory,
+		hideSettings,
+		hideHistory,
+		hideAccount,
+		hideWorktrees,
+		hideAnnouncement,
+	} = useExtensionState()
+	const [showKanbanModal, setShowKanbanModal] = useState(false)
+	const [hasShownKanbanModal, setHasShownKanbanModal] = useState(false)
 
-// Main app content - uses extension state
-const AppContent: React.FC = () => {
-  const {
-    showSettings,
-    showHistory,
-    showWelcome,
-    didHydrateState,
-  } = useExtensionState();
+	const { clineUser, organizations, activeOrganization } = useClineAuth()
 
-  // Loading state
-  if (!didHydrateState) {
-    return (
-      <div className="flex h-full items-center justify-center bg-background">
-        <div className="text-center">
-          <div className="text-2xl font-bold mb-4 text-foreground">CodeLine</div>
-          <div className="flex items-center justify-center gap-2">
-            <div className="w-2 h-2 rounded-full bg-cline animate-pulse" />
-            <div className="w-2 h-2 rounded-full bg-cline animate-pulse" style={{ animationDelay: '0.2s' }} />
-            <div className="w-2 h-2 rounded-full bg-cline animate-pulse" style={{ animationDelay: '0.4s' }} />
-          </div>
-        </div>
-      </div>
-    );
-  }
+	const showUpdateAnnouncementModal = useCallback(() => {
+		setShowAnnouncement(true)
+		GrpcAdapters.UiServiceClient.onDidShowAnnouncement({} as EmptyRequest)
+			.then((response: Boolean) => {
+				setShouldShowAnnouncement(response.value)
+			})
+			.catch((error) => {
+				console.error("Failed to acknowledge announcement:", error)
+			})
+	}, [setShouldShowAnnouncement, setShowAnnouncement])
 
-  return (
-    <div className="flex h-full flex-col bg-background text-foreground">
-      {/* Main Chat View - always rendered */}
-      <ChatView
-        isHidden={showSettings || showHistory}
-        showHistoryView={() => {}}
-      />
+	useEffect(() => {
+		if (!didHydrateState || showWelcome || hasShownKanbanModal) {
+			return
+		}
+		const hasDismissedKanbanModal = dismissedBanners?.some((banner) => banner.bannerId === CLINE_KANBAN_MODAL_DISMISS_ID)
+		if (!hasDismissedKanbanModal) {
+			setShowKanbanModal(true)
+		}
+		setHasShownKanbanModal(true)
+	}, [didHydrateState, dismissedBanners, hasShownKanbanModal, showWelcome])
 
-      {/* Settings overlay - TODO: implement SettingsView */}
-      {showSettings && (
-        <div className="absolute inset-0 bg-background z-10 flex flex-col">
-          <div className="flex items-center justify-between p-4 border-b border-border">
-            <h2 className="text-lg font-semibold">Settings</h2>
-          </div>
-          <div className="flex-1 overflow-auto p-4">
-            <p className="text-description">Settings view - Coming soon</p>
-          </div>
-        </div>
-      )}
+	// Keep update announcements queued until the Kanban modal has either shown and closed or been skipped.
+	useEffect(() => {
+		if (!didHydrateState || showWelcome || !shouldShowAnnouncement || showAnnouncement) {
+			return
+		}
+		const isKanbanModalBlocking = showKanbanModal || !hasShownKanbanModal
+		if (isKanbanModalBlocking) {
+			return
+		}
+		showUpdateAnnouncementModal()
+	}, [
+		didHydrateState,
+		showWelcome,
+		shouldShowAnnouncement,
+		showAnnouncement,
+		showKanbanModal,
+		hasShownKanbanModal,
+		showUpdateAnnouncementModal,
+	])
 
-      {/* History overlay - TODO: implement HistoryView */}
-      {showHistory && (
-        <div className="absolute inset-0 bg-background z-10 flex flex-col">
-          <div className="flex items-center justify-between p-4 border-b border-border">
-            <h2 className="text-lg font-semibold">History</h2>
-          </div>
-          <div className="flex-1 overflow-auto p-4">
-            <p className="text-description">History view - Coming soon</p>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
+	const handleCloseKanbanModal = useCallback((doNotShowAgain: boolean) => {
+		setShowKanbanModal(false)
+		if (doNotShowAgain) {
+			GrpcAdapters.StateServiceClient.dismissBanner({ value: CLINE_KANBAN_MODAL_DISMISS_ID }).catch((error) =>
+				console.error("Failed to persist Cline Kanban modal dismissal:", error),
+			)
+		}
+	}, [])
 
-// Root App component with provider
-const App: React.FC = () => {
-  return (
-    <ExtensionStateContextProvider>
-      <AppContent />
-    </ExtensionStateContextProvider>
-  );
-};
+	if (!didHydrateState) {
+		return null
+	}
 
-export default App;
+	if (showWelcome) {
+		return onboardingModels ? <OnboardingView onboardingModels={onboardingModels} /> : <WelcomeView />
+	}
+
+	return (
+		<div className="flex h-screen w-full flex-col">
+			<ClineKanbanLaunchModal onClose={handleCloseKanbanModal} open={showKanbanModal} />
+			{showSettings && <SettingsView onDone={hideSettings} targetSection={settingsTargetSection} />}
+			{showHistory && <HistoryView onDone={hideHistory} />}
+			{showMcp && <McpView initialTab={mcpTab} onDone={closeMcpView} />}
+			{showAccount && (
+				<AccountView
+					activeOrganization={activeOrganization}
+					clineUser={clineUser}
+					onDone={hideAccount}
+					organizations={organizations}
+				/>
+			)}
+			{showWorktrees && <WorktreesView onDone={hideWorktrees} />}
+			{/* Do not conditionally load ChatView, it's expensive and there's state we don't want to lose (user input, disableInput, askResponse promise, etc.) */}
+			<ChatViewWrapper
+				hideAnnouncement={hideAnnouncement}
+				isHidden={showSettings || showHistory || showMcp || showAccount || showWorktrees}
+				showAnnouncement={showAnnouncement}
+				showHistoryView={navigateToHistory}
+			/>
+		</div>
+	)
+}
+
+const App = () => {
+	return (
+		<Providers>
+			<AppContent />
+		</Providers>
+	)
+}
+
+export default App

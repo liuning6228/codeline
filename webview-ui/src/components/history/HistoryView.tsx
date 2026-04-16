@@ -1,442 +1,549 @@
-/**
- * 历史记录视图
- * 基于Claude Code的分布式会话管理模式
- * 提供会话历史记录查看和管理
- */
+import { BooleanRequest, EmptyRequest, StringArrayRequest } from "@shared/proto/cline/common"
+import { GetTaskHistoryRequest, TaskFavoriteRequest } from "@shared/proto/cline/task"
+import { VSCodeTextField } from "@vscode/webview-ui-toolkit/react"
+import Fuse, { FuseResult } from "fuse.js"
+import { FunnelIcon } from "lucide-react"
+import { memo, useCallback, useEffect, useMemo, useState } from "react"
+import { GroupedVirtuoso } from "react-virtuoso"
+import { Button } from "@/components/ui/button"
+import { Select, SelectContent, SelectItem, SelectTrigger } from "@/components/ui/select"
+import { useExtensionState } from "@/context/ExtensionStateContext"
+import { TaskServiceClient } from "@/services/grpc-client"
+import { formatSize } from "@/utils/format"
+import ViewHeader from "../common/ViewHeader"
+import HistoryViewItem from "./HistoryViewItem"
 
-import React, { useState, useEffect } from 'react';
-import { HistoryViewConfig } from '../../config/codeline-config';
-
-interface HistoryViewProps {
-  /** 历史视图配置 */
-  config: HistoryViewConfig;
-  /** 导航回调函数 */
-  onNavigate?: (viewName: string) => void;
-  /** 关闭回调 */
-  onClose?: () => void;
+type HistoryViewProps = {
+	onDone: () => void
 }
 
-interface HistoryEntry {
-  id: string;
-  title: string;
-  preview: string;
-  timestamp: number;
-  type: 'chat' | 'task' | 'file' | 'command';
-  tags: string[];
-  size: number;
+type SortOption = "newest" | "oldest" | "mostExpensive" | "mostTokens" | "mostRelevant"
+
+const isToday = (timestamp: number): boolean => {
+	const date = new Date(timestamp)
+	const today = new Date()
+	return today.toDateString() === date.toDateString()
 }
 
-const HistoryView: React.FC<HistoryViewProps> = ({ config, onNavigate, onClose }) => {
-  const [historyEntries, setHistoryEntries] = useState<HistoryEntry[]>([]);
-  const [selectedEntries, setSelectedEntries] = useState<string[]>([]);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [isLoading, setIsLoading] = useState(true);
-  
-  // 初始化历史记录
-  useEffect(() => {
-    const initializeHistory = async () => {
-      setIsLoading(true);
-      
-      try {
-        // 模拟加载历史记录
-        const mockHistory: HistoryEntry[] = [
-          {
-            id: 'hist-1',
-            title: 'User Authentication Implementation',
-            preview: 'Implemented JWT-based authentication system with refresh tokens and role-based access control...',
-            timestamp: Date.now() - 3600000, // 1小时前
-            type: 'task',
-            tags: ['auth', 'backend', 'security'],
-            size: 2450,
-          },
-          {
-            id: 'hist-2',
-            title: 'API Integration Discussion',
-            preview: 'Discussed how to integrate with third-party payment APIs and handle webhook security...',
-            timestamp: Date.now() - 7200000, // 2小时前
-            type: 'chat',
-            tags: ['api', 'integration', 'discussion'],
-            size: 1800,
-          },
-          {
-            id: 'hist-3',
-            title: 'Database Schema Design',
-            preview: 'Designed normalized database schema for user management with proper indexes and constraints...',
-            timestamp: Date.now() - 86400000, // 1天前
-            type: 'task',
-            tags: ['database', 'design', 'schema'],
-            size: 3200,
-          },
-          {
-            id: 'hist-4',
-            title: 'Frontend Component Refactoring',
-            preview: 'Refactored React components to use hooks and improve performance with memoization...',
-            timestamp: Date.now() - 172800000, // 2天前
-            type: 'task',
-            tags: ['frontend', 'react', 'refactoring'],
-            size: 1950,
-          },
-          {
-            id: 'hist-5',
-            title: 'Deployment Configuration',
-            preview: 'Configured CI/CD pipeline for automatic deployment to staging and production environments...',
-            timestamp: Date.now() - 259200000, // 3天前
-            type: 'task',
-            tags: ['devops', 'deployment', 'ci-cd'],
-            size: 2800,
-          },
-          {
-            id: 'hist-6',
-            title: 'Performance Optimization',
-            preview: 'Identified and fixed performance bottlenecks in API response time and database queries...',
-            timestamp: Date.now() - 345600000, // 4天前
-            type: 'chat',
-            tags: ['performance', 'optimization'],
-            size: 1650,
-          },
-        ];
-        
-        // 按时间倒序排序
-        const sortedHistory = mockHistory.sort((a, b) => b.timestamp - a.timestamp);
-        
-        // 限制数量
-        const limitedHistory = sortedHistory.slice(0, config.maxHistoryItems);
-        
-        setHistoryEntries(limitedHistory);
-      } catch (error) {
-        console.error('Failed to load history:', error);
-      } finally {
-        setIsLoading(false);
-      }
-    };
-    
-    if (config.enabled) {
-      initializeHistory();
-    }
-  }, [config]);
-  
-  // 过滤历史记录
-  const filteredEntries = historyEntries.filter(entry => {
-    if (!searchQuery.trim()) return true;
-    
-    const query = searchQuery.toLowerCase();
-    return (
-      entry.title.toLowerCase().includes(query) ||
-      entry.preview.toLowerCase().includes(query) ||
-      entry.tags.some(tag => tag.toLowerCase().includes(query))
-    );
-  });
-  
-  // 切换选中状态
-  const toggleSelection = (entryId: string) => {
-    setSelectedEntries(prev => {
-      if (prev.includes(entryId)) {
-        return prev.filter(id => id !== entryId);
-      } else {
-        return [...prev, entryId];
-      }
-    });
-  };
-  
-  // 全选/取消全选
-  const toggleSelectAll = () => {
-    if (selectedEntries.length === filteredEntries.length) {
-      setSelectedEntries([]);
-    } else {
-      setSelectedEntries(filteredEntries.map(entry => entry.id));
-    }
-  };
-  
-  // 删除选中条目
-  const deleteSelected = () => {
-    if (selectedEntries.length === 0) return;
-    
-    if (window.confirm(`Delete ${selectedEntries.length} selected history item(s)?`)) {
-      setHistoryEntries(prev => prev.filter(entry => !selectedEntries.includes(entry.id)));
-      setSelectedEntries([]);
-    }
-  };
-  
-  // 清空所有历史记录
-  const clearAllHistory = () => {
-    if (historyEntries.length === 0) return;
-    
-    if (window.confirm(`Clear all ${historyEntries.length} history items? This cannot be undone.`)) {
-      setHistoryEntries([]);
-      setSelectedEntries([]);
-    }
-  };
-  
-  // 格式化时间
-  const formatTime = (timestamp: number): string => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffMs = now.getTime() - timestamp;
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    
-    if (diffDays === 0) {
-      return 'Today, ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } else if (diffDays === 1) {
-      return 'Yesterday, ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    } else if (diffDays < 7) {
-      return `${diffDays} days ago`;
-    } else {
-      return date.toLocaleDateString();
-    }
-  };
-  
-  // 格式化文件大小
-  const formatSize = (size: number): string => {
-    if (size < 1024) return `${size} B`;
-    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
-    return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-  };
-  
-  // 获取类型图标
-  const getTypeIcon = (type: HistoryEntry['type']): string => {
-    switch (type) {
-      case 'chat': return '💬';
-      case 'task': return '⚡';
-      case 'file': return '📁';
-      case 'command': return '⌨️';
-      default: return '📄';
-    }
-  };
-  
-  if (!config.enabled) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-center">
-          <div className="text-2xl font-semibold mb-2">History View Disabled</div>
-          <div className="text-gray-400 mb-4">
-            History tracking is currently disabled in settings
-          </div>
-          {onClose && (
-            <button
-              className="px-4 py-2 bg-primary text-primary-foreground rounded-md hover:bg-primary/90"
-              onClick={onClose}
-            >
-              Go Back
-            </button>
-          )}
-        </div>
-      </div>
-    );
-  }
-  
-  if (isLoading) {
-    return (
-      <div className="flex h-full items-center justify-center">
-        <div className="text-lg text-gray-400">Loading history...</div>
-      </div>
-    );
-  }
-  
-  return (
-    <div className="flex h-full flex-col p-6">
-      {/* 头部 */}
-      <div className="mb-8">
-        <div className="flex justify-between items-center mb-4">
-          <div>
-            <h1 className="text-3xl font-bold mb-2">History</h1>
-            <p className="text-gray-400">
-              View and manage your conversation and task history
-            </p>
-          </div>
-          
-          {onClose && (
-            <button
-              onClick={onClose}
-              className="px-4 py-2 bg-secondary hover:bg-secondary/80 rounded"
-            >
-              Close
-            </button>
-          )}
-        </div>
-        
-        <div className="flex items-center justify-between">
-          <div className="text-sm text-gray-400">
-            {historyEntries.length} item{historyEntries.length !== 1 ? 's' : ''} total
-          </div>
-          
-          <div className="flex space-x-2">
-            <button
-              onClick={clearAllHistory}
-              className="px-3 py-1.5 bg-red-500/20 text-red-600 hover:bg-red-500/30 rounded text-sm"
-              disabled={historyEntries.length === 0}
-            >
-              Clear All
-            </button>
-          </div>
-        </div>
-      </div>
-      
-      {/* 搜索和筛选 */}
-      <div className="mb-6">
-        <div className="flex space-x-4">
-          <div className="flex-1">
-            <input
-              type="text"
-              placeholder="Search history..."
-              className="w-full p-3 bg-background border border-border rounded-lg"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-          
-          {config.supportsSearch && (
-            <button className="px-4 py-3 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90">
-              Search
-            </button>
-          )}
-        </div>
-      </div>
-      
-      {/* 批量操作栏 */}
-      {config.supportsBulkOperations && selectedEntries.length > 0 && (
-        <div className="mb-6 p-4 bg-secondary/50 rounded-lg flex items-center justify-between">
-          <div className="text-sm">
-            <span className="font-medium">{selectedEntries.length}</span> item{selectedEntries.length !== 1 ? 's' : ''} selected
-          </div>
-          <div className="flex space-x-2">
-            <button
-              onClick={deleteSelected}
-              className="px-3 py-1.5 bg-red-500/20 text-red-600 hover:bg-red-500/30 rounded text-sm"
-            >
-              Delete Selected
-            </button>
-            <button
-              onClick={() => setSelectedEntries([])}
-              className="px-3 py-1.5 bg-secondary hover:bg-secondary/80 rounded text-sm"
-            >
-              Clear Selection
-            </button>
-          </div>
-        </div>
-      )}
-      
-      {/* 历史记录列表 */}
-      <div className="flex-1 overflow-auto">
-        {filteredEntries.length === 0 ? (
-          <div className="flex h-full items-center justify-center">
-            <div className="text-center">
-              <div className="text-2xl font-semibold mb-2">
-                {searchQuery ? 'No Results Found' : 'No History Yet'}
-              </div>
-              <div className="text-gray-400 mb-4">
-                {searchQuery 
-                  ? 'Try a different search term' 
-                  : 'Your conversation and task history will appear here'}
-              </div>
-              {searchQuery && (
-                <button
-                  onClick={() => setSearchQuery('')}
-                  className="px-4 py-2 bg-secondary hover:bg-secondary/80 rounded"
-                >
-                  Clear Search
-                </button>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            {config.supportsBulkOperations && (
-              <div className="flex items-center space-x-3 p-4 bg-secondary/30 rounded-lg">
-                <input
-                  type="checkbox"
-                  checked={selectedEntries.length === filteredEntries.length && filteredEntries.length > 0}
-                  onChange={toggleSelectAll}
-                  className="rounded"
-                />
-                <span className="text-sm text-gray-400">
-                  Select all {filteredEntries.length} item{filteredEntries.length !== 1 ? 's' : ''}
-                </span>
-              </div>
-            )}
-            
-            {filteredEntries.map(entry => (
-              <div
-                key={entry.id}
-                className={`p-4 rounded-lg border border-border hover:border-primary/50 transition-all ${
-                  selectedEntries.includes(entry.id) ? 'bg-primary/10 border-primary' : ''
-                }`}
-              >
-                <div className="flex items-start space-x-4">
-                  {config.supportsBulkOperations && (
-                    <input
-                      type="checkbox"
-                      checked={selectedEntries.includes(entry.id)}
-                      onChange={() => toggleSelection(entry.id)}
-                      className="mt-1 rounded"
-                    />
-                  )}
-                  
-                  <div className="flex-1">
-                    <div className="flex justify-between items-start mb-2">
-                      <div className="flex items-center space-x-3">
-                        <div className="text-xl">{getTypeIcon(entry.type)}</div>
-                        <div>
-                          <div className="font-medium">{entry.title}</div>
-                          <div className="text-xs text-gray-400 mt-1">
-                            {formatTime(entry.timestamp)} • {formatSize(entry.size)}
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center space-x-2">
-                        <span className={`px-2 py-1 text-xs rounded capitalize ${
-                          entry.type === 'chat' ? 'bg-blue-500/20 text-blue-600' :
-                          entry.type === 'task' ? 'bg-green-500/20 text-green-600' :
-                          entry.type === 'file' ? 'bg-yellow-500/20 text-yellow-600' :
-                          'bg-purple-500/20 text-purple-600'
-                        }`}>
-                          {entry.type}
-                        </span>
-                      </div>
-                    </div>
-                    
-                    <div className="text-gray-400 mb-3 line-clamp-2">
-                      {entry.preview}
-                    </div>
-                    
-                    <div className="flex justify-between items-center">
-                      <div className="flex flex-wrap gap-1">
-                        {entry.tags.map(tag => (
-                          <span
-                            key={tag}
-                            className="px-2 py-0.5 bg-secondary text-xs rounded"
-                          >
-                            {tag}
-                          </span>
-                        ))}
-                      </div>
-                      <div className="flex space-x-2">
-                        <button className="px-2 py-1 text-xs bg-secondary hover:bg-secondary/80 rounded">
-                          View
-                        </button>
-                        <button className="px-2 py-1 text-xs bg-secondary hover:bg-secondary/80 rounded">
-                          Restore
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-      
-      {/* 自动保存状态 */}
-      {config.autoSaveHistory && (
-        <div className="mt-6 pt-4 border-t border-border">
-          <div className="flex items-center justify-center text-sm text-gray-400">
-            <div className="w-2 h-2 rounded-full bg-green-500 mr-2"></div>
-            History is automatically saved
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
+const HISTORY_FILTERS = {
+	newest: "Newest",
+	oldest: "Oldest",
+	mostExpensive: "Most Expensive",
+	mostTokens: "Most Tokens",
+	mostRelevant: "Most Relevant",
+	workspaceOnly: "Workspace Only",
+	favoritesOnly: "Favorites Only",
+}
 
-export default HistoryView;
+const HistoryView = ({ onDone }: HistoryViewProps) => {
+	const extensionStateContext = useExtensionState()
+	const { taskHistory, onRelinquishControl, environment } = extensionStateContext
+	const [searchQuery, setSearchQuery] = useState("")
+	const [sortOption, setSortOption] = useState<SortOption>("newest")
+	const [lastNonRelevantSort, setLastNonRelevantSort] = useState<SortOption | null>("newest")
+	const [deleteAllDisabled, setDeleteAllDisabled] = useState(false)
+	const [selectedItems, setSelectedItems] = useState<string[]>([])
+	const [showFavoritesOnly, setShowFavoritesOnly] = useState(false)
+	const [showCurrentWorkspaceOnly, setShowCurrentWorkspaceOnly] = useState(false)
+
+	// Keep track of pending favorite toggle operations
+	const [pendingFavoriteToggles, setPendingFavoriteToggles] = useState<Record<string, boolean>>({})
+
+	// Load filtered task history with gRPC
+	const [tasks, setTasks] = useState<any[]>([])
+
+	// Load and refresh task history
+	const loadTaskHistory = useCallback(async () => {
+		try {
+			const response = await TaskServiceClient.getTaskHistory(
+				GetTaskHistoryRequest.create({
+					favoritesOnly: showFavoritesOnly,
+					searchQuery: searchQuery || undefined,
+					sortBy: sortOption,
+					currentWorkspaceOnly: showCurrentWorkspaceOnly,
+				}),
+			)
+			setTasks(response.tasks || [])
+		} catch (error) {
+			console.error("Error loading task history:", error)
+		}
+	}, [showFavoritesOnly, showCurrentWorkspaceOnly, searchQuery, sortOption, taskHistory])
+
+	// Load when filters change
+	useEffect(() => {
+		// Force a complete refresh when both filters are active
+		// to ensure proper combined filtering
+		if (showFavoritesOnly && showCurrentWorkspaceOnly) {
+			setTasks([])
+		}
+		loadTaskHistory()
+	}, [loadTaskHistory, showFavoritesOnly, showCurrentWorkspaceOnly])
+
+	const toggleFavorite = useCallback(
+		async (taskId: string, currentValue: boolean) => {
+			// Optimistic UI update
+			setPendingFavoriteToggles((prev) => ({ ...prev, [taskId]: !currentValue }))
+
+			try {
+				await TaskServiceClient.toggleTaskFavorite(
+					TaskFavoriteRequest.create({
+						taskId,
+						isFavorited: !currentValue,
+					}),
+				)
+
+				// Refresh if either filter is active to ensure proper combined filtering
+				if (showFavoritesOnly || showCurrentWorkspaceOnly) {
+					loadTaskHistory()
+				}
+			} catch (err) {
+				console.error(`[FAVORITE_TOGGLE_UI] Error for task ${taskId}:`, err)
+				// Revert optimistic update
+				setPendingFavoriteToggles((prev) => {
+					const updated = { ...prev }
+					delete updated[taskId]
+					return updated
+				})
+			} finally {
+				// Clean up pending state after 1 second
+				setTimeout(() => {
+					setPendingFavoriteToggles((prev) => {
+						const updated = { ...prev }
+						delete updated[taskId]
+						return updated
+					})
+				}, 1000)
+			}
+		},
+		[showFavoritesOnly, loadTaskHistory],
+	)
+
+	// Use the onRelinquishControl hook instead of message event
+	useEffect(() => {
+		return onRelinquishControl(() => {
+			setDeleteAllDisabled(false)
+		})
+	}, [onRelinquishControl])
+
+	const { totalTasksSize, setTotalTasksSize } = extensionStateContext
+
+	const fetchTotalTasksSize = useCallback(async () => {
+		try {
+			const response = await TaskServiceClient.getTotalTasksSize(EmptyRequest.create({}))
+			if (response && typeof response.value === "number") {
+				setTotalTasksSize?.(response.value || 0)
+			}
+		} catch (error) {
+			console.error("Error getting total tasks size:", error)
+		}
+	}, [setTotalTasksSize])
+
+	// Request total tasks size when component mounts
+	useEffect(() => {
+		fetchTotalTasksSize()
+	}, [fetchTotalTasksSize])
+
+	useEffect(() => {
+		if (searchQuery && sortOption !== "mostRelevant" && !lastNonRelevantSort) {
+			setLastNonRelevantSort(sortOption)
+			setSortOption("mostRelevant")
+		} else if (!searchQuery && sortOption === "mostRelevant" && lastNonRelevantSort) {
+			setSortOption(lastNonRelevantSort)
+			setLastNonRelevantSort(null)
+		}
+	}, [searchQuery, sortOption, lastNonRelevantSort])
+
+	const handleHistorySelect = useCallback((itemId: string, checked: boolean) => {
+		setSelectedItems((prev) => {
+			if (checked) {
+				return [...prev, itemId]
+			} else {
+				return prev.filter((id) => id !== itemId)
+			}
+		})
+	}, [])
+
+	const handleDeleteHistoryItem = useCallback(
+		(id: string) => {
+			TaskServiceClient.deleteTasksWithIds(StringArrayRequest.create({ value: [id] }))
+				.then(() => fetchTotalTasksSize())
+				.catch((error) => console.error("Error deleting task:", error))
+		},
+		[fetchTotalTasksSize],
+	)
+
+	const handleDeleteSelectedHistoryItems = useCallback(
+		(ids: string[]) => {
+			if (ids.length > 0) {
+				TaskServiceClient.deleteTasksWithIds(StringArrayRequest.create({ value: ids }))
+					.then(() => fetchTotalTasksSize())
+					.catch((error) => console.error("Error deleting tasks:", error))
+				setSelectedItems([])
+			}
+		},
+		[fetchTotalTasksSize],
+	)
+
+	const fuse = useMemo(() => {
+		return new Fuse(tasks, {
+			keys: ["task"],
+			threshold: 0.6,
+			shouldSort: true,
+			isCaseSensitive: false,
+			ignoreLocation: false,
+			includeMatches: true,
+			minMatchCharLength: 1,
+		})
+	}, [tasks])
+
+	const taskHistorySearchResults = useMemo(() => {
+		const results = searchQuery
+			? fuse
+					.search(searchQuery)
+					?.filter(({ matches }) => matches && matches.length)
+					.map(({ item }) => item)
+			: tasks
+
+		results.sort((a, b) => {
+			switch (sortOption) {
+				case "oldest":
+					return a.ts - b.ts
+				case "mostExpensive":
+					return (b.totalCost || 0) - (a.totalCost || 0)
+				case "mostTokens":
+					return (
+						(b.tokensIn || 0) +
+						(b.tokensOut || 0) +
+						(b.cacheWrites || 0) +
+						(b.cacheReads || 0) -
+						((a.tokensIn || 0) + (a.tokensOut || 0) + (a.cacheWrites || 0) + (a.cacheReads || 0))
+					)
+				case "mostRelevant":
+					// NOTE: you must never sort directly on object since it will cause members to be reordered
+					return searchQuery ? 0 : b.ts - a.ts // Keep fuse order if searching, otherwise sort by newest
+				case "newest":
+				default:
+					return b.ts - a.ts
+			}
+		})
+
+		return results
+	}, [tasks, searchQuery, fuse, sortOption])
+
+	// Group tasks into "Today" and "Older" (only for date-based sorts)
+	const { groupedTasks, groupCounts, groupLabels } = useMemo(() => {
+		const isDateSort = sortOption === "newest" || sortOption === "oldest"
+
+		if (!isDateSort) {
+			// No grouping for non-date sorts
+			return {
+				groupedTasks: taskHistorySearchResults,
+				groupCounts: [taskHistorySearchResults.length],
+				groupLabels: [] as string[],
+			}
+		}
+
+		const todayTasks: any[] = []
+		const olderTasks: any[] = []
+
+		taskHistorySearchResults.forEach((task) => {
+			if (isToday(task.ts)) {
+				todayTasks.push(task)
+			} else {
+				olderTasks.push(task)
+			}
+		})
+
+		const groups: { tasks: any[]; label: string }[] = []
+		if (todayTasks.length > 0) {
+			groups.push({ tasks: todayTasks, label: "Today" })
+		}
+		if (olderTasks.length > 0) {
+			groups.push({ tasks: olderTasks, label: "Older" })
+		}
+
+		return {
+			groupedTasks: groups.flatMap((g) => g.tasks),
+			groupCounts: groups.map((g) => g.tasks.length),
+			groupLabels: groups.map((g) => g.label),
+		}
+	}, [taskHistorySearchResults, sortOption])
+
+	// Calculate total size of selected items
+	const selectedItemsSize = useMemo(() => {
+		if (selectedItems.length === 0) {
+			return 0
+		}
+
+		return taskHistory.filter((item) => selectedItems.includes(item.id)).reduce((total, item) => total + (item.size || 0), 0)
+	}, [selectedItems, taskHistory])
+
+	const handleBatchHistorySelect = useCallback(
+		(selectAll: boolean) => {
+			if (selectAll) {
+				setSelectedItems(taskHistorySearchResults.map((item) => item.id))
+			} else {
+				setSelectedItems([])
+			}
+		},
+		[taskHistorySearchResults],
+	)
+
+	return (
+		<div className="fixed overflow-hidden inset-0 flex flex-col w-full">
+			{/* HEADER */}
+			<ViewHeader environment={environment} onDone={onDone} title="History" />
+
+			{/* FILTERS */}
+			<div className="flex flex-col gap-3 px-3">
+				{/* REPLACE VSCODE RADIO GROUP */}
+				<div className="flex justify-between items-center">
+					{/* SEARCH BOX */}
+					<VSCodeTextField
+						className="w-full"
+						onInput={(e) => {
+							const newValue = (e.target as HTMLInputElement)?.value
+							setSearchQuery(newValue)
+							if (newValue && !searchQuery && sortOption !== "mostRelevant") {
+								setLastNonRelevantSort(sortOption)
+								setSortOption("mostRelevant")
+							}
+						}}
+						placeholder="Fuzzy search history..."
+						value={searchQuery}>
+						<div className="codicon codicon-search opacity-80 mt-0.5 !text-sm" slot="start" />
+						{searchQuery && (
+							<div
+								aria-label="Clear search"
+								className="input-icon-button codicon codicon-close flex justify-center items-center h-full"
+								onClick={() => setSearchQuery("")}
+								slot="end"
+							/>
+						)}
+					</VSCodeTextField>
+					<Select
+						onValueChange={(value) => {
+							// Handle sort options
+							if (
+								value === "newest" ||
+								value === "oldest" ||
+								value === "mostExpensive" ||
+								value === "mostTokens" ||
+								value === "mostRelevant"
+							) {
+								if (value === "mostRelevant" && !searchQuery) {
+									// Don't allow selecting mostRelevant without a search query
+									return
+								}
+								setSortOption(value as SortOption)
+								if (value !== "mostRelevant") {
+									setLastNonRelevantSort(value as SortOption)
+								}
+							}
+							// Handle filter toggles
+							else if (value === "workspaceOnly") {
+								setShowCurrentWorkspaceOnly(!showCurrentWorkspaceOnly)
+							} else if (value === "favoritesOnly") {
+								setShowFavoritesOnly(!showFavoritesOnly)
+							}
+						}}
+						value={sortOption}>
+						<SelectTrigger className="border-0 cursor-pointer" showIcon={false}>
+							<FunnelIcon className="!size-2 text-foreground" />
+						</SelectTrigger>
+						<SelectContent position="popper">
+							{Object.entries(HISTORY_FILTERS).map(([key, value]) => {
+								const isSortOption = ["newest", "oldest", "mostExpensive", "mostTokens", "mostRelevant"].includes(
+									key,
+								)
+								const isFilterOption = ["workspaceOnly", "favoritesOnly"].includes(key)
+								const isSelected = isSortOption
+									? sortOption === key
+									: key === "workspaceOnly"
+										? showCurrentWorkspaceOnly
+										: key === "favoritesOnly"
+											? showFavoritesOnly
+											: false
+								const isDisabled = key === "mostRelevant" && !searchQuery
+
+								return (
+									<SelectItem
+										className={isSelected ? "bg-button-background/30" : ""}
+										disabled={isDisabled}
+										key={key}
+										value={key}>
+										<span className="flex items-center gap-2">
+											{isFilterOption && (
+												<span
+													className={`codicon ${
+														key === "workspaceOnly" ? "codicon-folder" : "codicon-star-full"
+													} ${isSelected ? "text-button-background" : ""}`}
+												/>
+											)}
+											{value}
+										</span>
+									</SelectItem>
+								)
+							})}
+						</SelectContent>
+					</Select>
+				</div>
+			</div>
+
+			{/* HISTORY ITEMS */}
+			<div className="flex-grow overflow-y-auto m-0 w-full py-2">
+				<GroupedVirtuoso
+					className="flex-grow overflow-y-scroll"
+					groupContent={(index) => (
+						<div className="px-4 py-2 text-xs font-bold uppercase tracking-wide sticky top-0 z-10 text-description bg-sidebar-background border-b-border-panel">
+							{groupLabels[index]}
+						</div>
+					)}
+					groupCounts={groupCounts}
+					itemContent={(index) => {
+						const item = groupedTasks[index]
+						return (
+							<HistoryViewItem
+								handleDeleteHistoryItem={handleDeleteHistoryItem}
+								handleHistorySelect={handleHistorySelect}
+								index={index}
+								item={item}
+								pendingFavoriteToggles={pendingFavoriteToggles}
+								selectedItems={selectedItems}
+								toggleFavorite={toggleFavorite}
+							/>
+						)
+					}}
+				/>
+			</div>
+
+			{/* FOOTER */}
+			<div className="p-2.5 border-t border-t-border-panel">
+				<div className="flex gap-2.5 mb-2.5">
+					<Button className="flex-1" onClick={() => handleBatchHistorySelect(true)} variant="secondary">
+						Select All
+					</Button>
+					<Button className="flex-1" onClick={() => handleBatchHistorySelect(false)} variant="secondary">
+						Select None
+					</Button>
+				</div>
+				{selectedItems.length > 0 ? (
+					<Button
+						aria-label="Delete selected items"
+						className="w-full"
+						onClick={() => {
+							handleDeleteSelectedHistoryItems(selectedItems)
+						}}
+						variant="danger">
+						Delete {selectedItems.length > 1 ? selectedItems.length : ""} Selected
+						{selectedItemsSize > 0 ? ` (${formatSize(selectedItemsSize)})` : ""}
+					</Button>
+				) : (
+					<Button
+						aria-label="Delete all history"
+						className="w-full"
+						disabled={deleteAllDisabled || taskHistory.length === 0}
+						onClick={() => {
+							setDeleteAllDisabled(true)
+							TaskServiceClient.deleteAllTaskHistory(BooleanRequest.create({}))
+								.then(() => fetchTotalTasksSize())
+								.catch((error) => console.error("Error deleting task history:", error))
+								.finally(() => setDeleteAllDisabled(false))
+						}}
+						variant="danger">
+						Delete All History{totalTasksSize !== null ? ` (${formatSize(totalTasksSize)})` : ""}
+					</Button>
+				)}
+			</div>
+		</div>
+	)
+}
+
+// https://gist.github.com/evenfrost/1ba123656ded32fb7a0cd4651efd4db0
+export const highlight = (fuseSearchResult: FuseResult<any>[], highlightClassName: string = "history-item-highlight") => {
+	const set = (obj: Record<string, any>, path: string, value: any) => {
+		const pathValue = path.split(".")
+		let i: number
+
+		for (i = 0; i < pathValue.length - 1; i++) {
+			obj = obj[pathValue[i]] as Record<string, any>
+		}
+
+		obj[pathValue[i]] = value
+	}
+
+	// Function to merge overlapping regions
+	const mergeRegions = (regions: [number, number][]): [number, number][] => {
+		if (regions.length === 0) {
+			return regions
+		}
+
+		// Sort regions by start index
+		regions.sort((a, b) => a[0] - b[0])
+
+		const merged: [number, number][] = [regions[0]]
+
+		for (let i = 1; i < regions.length; i++) {
+			const last = merged[merged.length - 1]
+			const current = regions[i]
+
+			if (current[0] <= last[1] + 1) {
+				// Overlapping or adjacent regions
+				last[1] = Math.max(last[1], current[1])
+			} else {
+				merged.push(current)
+			}
+		}
+
+		return merged
+	}
+
+	const generateHighlightedText = (inputText: string, regions: [number, number][] = []) => {
+		if (regions.length === 0) {
+			return inputText
+		}
+
+		// Sort and merge overlapping regions
+		const mergedRegions = mergeRegions(regions)
+
+		let content = ""
+		let nextUnhighlightedRegionStartingIndex = 0
+
+		mergedRegions.forEach((region) => {
+			const start = region[0]
+			const end = region[1]
+			const lastRegionNextIndex = end + 1
+
+			content += [
+				inputText.substring(nextUnhighlightedRegionStartingIndex, start),
+				`<span class="${highlightClassName}">`,
+				inputText.substring(start, lastRegionNextIndex),
+				"</span>",
+			].join("")
+
+			nextUnhighlightedRegionStartingIndex = lastRegionNextIndex
+		})
+
+		content += inputText.substring(nextUnhighlightedRegionStartingIndex)
+
+		return content
+	}
+
+	return fuseSearchResult
+		.filter(({ matches }) => matches && matches.length)
+		.map(({ item, matches }) => {
+			const highlightedItem = { ...item }
+
+			matches?.forEach((match) => {
+				if (match.key && typeof match.value === "string" && match.indices) {
+					// Merge overlapping regions before generating highlighted text
+					const mergedIndices = mergeRegions([...match.indices])
+					set(highlightedItem, match.key, generateHighlightedText(match.value, mergedIndices))
+				}
+			})
+
+			return highlightedItem
+		})
+}
+
+export default memo(HistoryView)

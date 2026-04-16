@@ -1,10 +1,10 @@
 /**
- * Layout components barrel export
+ * Export all layout components
  */
 
-export { ChatLayout } from './ChatLayout';
-export { WelcomeSection } from './WelcomeSection';
-export { TaskSection } from './TaskSection';
-export { MessagesArea } from './MessagesArea';
-export { InputSection } from './InputSection';
-export { ActionButtons } from './ActionButtons';
+export { ActionButtons } from "./ActionButtons"
+export { ChatLayout } from "./ChatLayout"
+export { InputSection } from "./InputSection"
+export { MessagesArea } from "./MessagesArea"
+export { TaskSection } from "./TaskSection"
+export { WelcomeSection } from "./WelcomeSection"

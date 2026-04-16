@@ -15,6 +15,7 @@ import { ApprovalWorkflow, ApprovalItem } from './workflow/approvalWorkflow';
 import { EditorCommands } from './commands/editorCommands';
 import { PluginExtension } from './plugins/PluginExtension';
 import { ToolContext } from './tools/ToolInterface';
+import EnhancedEngineAdapter from './core/EnhancedEngineAdapter';
 
 export class CodeLineExtension {
   private static instance: CodeLineExtension;
@@ -31,6 +32,7 @@ export class CodeLineExtension {
   private editorCommands?: EditorCommands;
   private approvalWorkflow?: ApprovalWorkflow;
   private pluginExtension?: PluginExtension;
+  private enhancedEngineAdapter?: EnhancedEngineAdapter;
   private context: vscode.ExtensionContext;
 
   private constructor(context: vscode.ExtensionContext) {
@@ -95,6 +97,49 @@ export class CodeLineExtension {
       terminalExecutor: this.terminalExecutor!,
       browserAutomator: this.browserAutomator!
     };
+  }
+
+  /**
+   * 初始化增强引擎适配器（按需创建）
+   */
+  private async ensureEnhancedEngineAdapterInitialized(): Promise<EnhancedEngineAdapter> {
+    if (!this.enhancedEngineAdapter) {
+      const config = {
+        extension: this,
+        context: this.context,
+        verbose: true,
+        enableStreaming: true,
+        defaultMode: 'act' as const,
+        maxConcurrentTools: 3,
+        toolRegistryConfig: {
+          enableCaching: true,
+          enableLazyLoading: true,
+          defaultCategories: ['file', 'terminal', 'browser'] as any[],
+          maxConcurrentTools: 3,
+          defaultTimeout: 30000,
+        },
+        onEngineReady: () => {
+          console.log('CodeLine: Enhanced engine adapter ready');
+        },
+        onStateUpdate: (state: any) => {
+          console.log('CodeLine: Enhanced engine state updated');
+        },
+        onError: (error: Error) => {
+          console.error('CodeLine: Enhanced engine error:', error);
+        },
+      };
+      
+      this.enhancedEngineAdapter = EnhancedEngineAdapter.getInstance(config);
+      
+      // 尝试初始化，但不阻塞
+      this.enhancedEngineAdapter.initialize().then(success => {
+        console.log(`CodeLine: Enhanced engine adapter ${success ? 'successfully' : 'failed to'} initialize`);
+      }).catch(error => {
+        console.error('CodeLine: Enhanced engine adapter initialization failed:', error);
+      });
+    }
+    
+    return this.enhancedEngineAdapter;
   }
 
   /**
@@ -208,16 +253,72 @@ export class CodeLineExtension {
   }
   
   /**
-   * 异步初始化SidebarProvider的TaskEngine
+   * 获取增强引擎适配器（按需初始化）
+   */
+  public async getEnhancedEngineAdapter(): Promise<EnhancedEngineAdapter> {
+    return await this.ensureEnhancedEngineAdapterInitialized();
+  }
+  
+  /**
+   * 获取增强引擎状态
+   */
+  public async getEnhancedEngineStatus(): Promise<any> {
+    try {
+      const adapter = await this.ensureEnhancedEngineAdapterInitialized();
+      const state = adapter.getState();
+      const engine = adapter.getEngine();
+      
+      return {
+        adapterReady: state.engineReady,
+        engineExists: engine !== null,
+        mode: state.engineMode,
+        toolCount: state.toolCount,
+        conversationCount: state.conversationCount,
+        lastActivity: state.lastActivity,
+        engineState: engine ? engine.getState() : null,
+      };
+    } catch (error) {
+      return {
+        adapterReady: false,
+        engineExists: false,
+        error: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
+  
+  /**
+   * 异步初始化SidebarProvider的TaskEngine和EnhancedEngineAdapter
    */
   public async initializeSidebarProviderTaskEngine(): Promise<void> {
     const provider = this.getSidebarProvider();
     if (provider && !provider['_taskEngine']) {
       try {
+        // 初始化TaskEngine
         const { fileManager, taskEngine } = await this.ensureTaskEngineInitialized();
         provider.setTaskEngine(taskEngine);
         provider.setFileManager(fileManager);
         console.log('CodeLine: TaskEngine and FileManager initialized for SidebarProvider');
+        
+        // 初始化EnhancedEngineAdapter（但不阻塞）
+        this.ensureEnhancedEngineAdapterInitialized().then(async adapter => {
+          try {
+            // 设置增强引擎
+            const engine = adapter.getEngine();
+            if (engine) {
+              provider.setEnhancedQueryEngine(engine);
+              console.log('CodeLine: EnhancedQueryEngine set for SidebarProvider');
+            }
+            
+            // 设置工具注册表
+            const toolRegistry = adapter.getToolRegistry();
+            if (toolRegistry) {
+              provider.setToolRegistry(toolRegistry);
+              console.log('CodeLine: ToolRegistry set for SidebarProvider');
+            }
+          } catch (error) {
+            console.warn('CodeLine: Failed to set enhanced engine for SidebarProvider:', error);
+          }
+        });
       } catch (error) {
         console.warn('CodeLine: Failed to initialize TaskEngine for SidebarProvider:', error);
       }

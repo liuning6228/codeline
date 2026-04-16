@@ -1,10 +1,11 @@
 /**
  * 增强工具注册表
  * 集成claude-code-haha-main的工具管理能力，支持流式执行和权限控制
+ * 
+ * Zod兼容性更新（2026-04-08）：使用真正的Zod库
  */
 
 import * as vscode from 'vscode';
-import { z } from 'zod';
 import { 
   Tool, 
   ToolDefinition, 
@@ -15,7 +16,8 @@ import {
   findToolByName,
   findToolsByCategory,
   ToolProgress,
-  PermissionResult
+  PermissionResult,
+  z  // 导入真正的Zod
 } from './Tool';
 import { BaseTool, ExtendedToolContext } from './BaseTool';
 import { StreamingToolExecutor, ExecutionOptions } from '../executor/StreamingToolExecutor';
@@ -202,6 +204,52 @@ export class EnhancedToolRegistry {
       return true;
     } catch (error: any) {
       this.outputChannel.appendLine(`❌ Failed to register tool ${tool.id}: ${error.message}`);
+      return false;
+    }
+  }
+  
+  /**
+   * 检查工具是否已注册
+   */
+  public hasTool(toolId: string): boolean {
+    return this.tools.has(toolId);
+  }
+  
+  /**
+   * 取消注册工具
+   */
+  public unregisterTool(toolId: string): boolean {
+    try {
+      // 检查工具是否存在
+      if (!this.tools.has(toolId)) {
+        return false;
+      }
+      
+      // 从工具映射中移除
+      this.tools.delete(toolId);
+      
+      // 从类别中移除
+      for (const [category, toolSet] of this.toolCategories) {
+        toolSet.delete(toolId);
+        if (toolSet.size === 0) {
+          this.toolCategories.delete(category);
+        }
+      }
+      
+      // 移除使用统计
+      this.usageStats.delete(toolId);
+      
+      // 移除别名
+      for (const [alias, id] of this.toolAliases) {
+        if (id === toolId) {
+          this.toolAliases.delete(alias);
+        }
+      }
+      
+      this.outputChannel.appendLine(`🗑️ Unregistered tool: ${toolId}`);
+      return true;
+    } catch (error: any) {
+      this.outputChannel.appendLine(`❌ Failed to unregister tool ${toolId}: ${error.message}`);
       return false;
     }
   }

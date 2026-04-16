@@ -1,12 +1,44 @@
 /**
  * CodeLine 核心工具抽象
  * 借鉴claude-code-haha-main的Tool架构，结合CodeLine的VSCode扩展特性
+ * 
+ * Zod兼容性更新（2026-04-08）：
+ * 1. 替换模拟ZodSchema为真正的Zod库
+ * 2. 添加兼容层支持渐进式迁移
+ * 3. 保持向后兼容性
  */
 
 import * as vscode from 'vscode';
-import { z } from 'zod';
-import { ToolCategory } from '../types';
+import { ToolCategory } from '../types/index';
 export { ToolCategory };
+
+// ==================== Zod兼容性导入 ====================
+
+// 导入Zod兼容层，支持真正的Zod和向后兼容
+import {
+  z,
+  ZodSchema,
+  createCompatibleSchema,
+  isCompatibleSchema,
+  getRealSchema,
+  unifiedParse,
+  unifiedSafeParse,
+  compatibility,
+  ZodError
+} from './ZodCompatibility';
+
+// 导出Zod相关类型和工具
+export { 
+  z, 
+  ZodSchema, 
+  createCompatibleSchema, 
+  isCompatibleSchema, 
+  getRealSchema,
+  unifiedParse,
+  unifiedSafeParse,
+  compatibility,
+  ZodError 
+};
 
 // ==================== 类型定义 ====================
 
@@ -156,6 +188,12 @@ export interface ToolCapabilities {
   isDestructive: boolean;
   requiresWorkspace: boolean;
   supportsStreaming: boolean;
+  requiresFileAccess?: boolean;
+  canModifyFiles?: boolean;
+  canReadFiles?: boolean;
+  canExecuteCommands?: boolean;
+  canAccessNetwork?: boolean;
+  requiresModel?: boolean;
 }
 
 // ==================== 工具抽象基类 ====================
@@ -173,7 +211,7 @@ export abstract class Tool<Input = any, Output = any> {
   abstract readonly author: string;
   
   // 输入模式验证
-  abstract readonly inputSchema: z.ZodSchema<Input>;
+  abstract readonly inputSchema: ZodSchema<Input>;
   
   // 工具能力
   abstract readonly capabilities: ToolCapabilities;
@@ -238,7 +276,7 @@ export interface ToolDefinition<Input = any, Output = any> {
   category: ToolCategory;
   version: string;
   author: string;
-  inputSchema: z.ZodSchema<Input>;
+  inputSchema: ZodSchema<Input>;
   capabilities: ToolCapabilities;
   isEnabled?: (context: ToolUseContext) => boolean | Promise<boolean>;
   isConcurrencySafe?: (input: Input, context: ToolUseContext) => boolean | Promise<boolean>;
@@ -304,11 +342,12 @@ export function findToolByName(tools: Tools, name: string): Tool | undefined {
  */
 export function findToolsByCategory(tools: Tools, category: ToolCategory): Tool[] {
   const result: Tool[] = [];
-  for (const tool of tools.values()) {
+  // 避免迭代器问题，使用Array.from或forEach
+  tools.forEach((tool) => {
     if (tool.category === category) {
       result.push(tool);
     }
-  }
+  });
   return result;
 }
 

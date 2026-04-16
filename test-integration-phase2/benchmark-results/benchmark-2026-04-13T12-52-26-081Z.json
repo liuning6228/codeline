@@ -1,0 +1,53 @@
+{
+  "timestamp": "2026-04-13T12:52:26.082Z",
+  "suites": [
+    {
+      "name": "EnhancedEngineAdapter",
+      "tests": [
+        {
+          "name": "module-load",
+          "passed": false,
+          "time": 0,
+          "error": "加载失败: describe is not defined"
+        }
+      ],
+      "passed": 0,
+      "failed": 1,
+      "time": 3
+    },
+    {
+      "name": "EnhancedEngineAdapterE2E",
+      "tests": [
+        {
+          "name": "module-load",
+          "passed": false,
+          "time": 0,
+          "error": "加载失败: describe is not defined"
+        }
+      ],
+      "passed": 0,
+      "failed": 1,
+      "time": 6
+    },
+    {
+      "name": "simple",
+      "tests": [
+        {
+          "name": "module-load",
+          "passed": false,
+          "time": 0,
+          "error": "加载失败: describe is not defined"
+        }
+      ],
+      "passed": 0,
+      "failed": 1,
+      "time": 1
+    }
+  ],
+  "totalTests": 3,
+  "passedTests": 0,
+  "failedTests": 3,
+  "totalTime": 10,
+  "startTime": 1776084746071,
+  "endTime": 1776084746082
+}

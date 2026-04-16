@@ -1,0 +1,25 @@
+{
+  "name": "test-integration-phase2",
+  "version": "1.0.0",
+  "description": "CodeLine Phase 2 集成测试环境",
+  "main": "run-tests.js",
+  "type": "commonjs",
+  "scripts": {
+    "test": "mocha dist/tests/*.test.js",
+    "test:e2e": "mocha dist/tests/EnhancedEngineAdapterE2E.test.js",
+    "build": "tsc --project tsconfig.isolated.json",
+    "clean": "rm -rf dist",
+    "verify": "node run-tests.js",
+    "e2e": "node run-e2e-tests.js"
+  },
+  "keywords": ["codeline", "integration-test", "phase2"],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/assert": "^1.5.11",
+    "@types/mocha": "^10.0.10",
+    "@types/node": "^25.6.0",
+    "mocha": "^11.7.5",
+    "typescript": "^6.0.2"
+  }
+}

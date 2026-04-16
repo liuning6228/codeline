@@ -1,0 +1,14 @@
+{
+  "extension": ["js"],
+  "spec": [
+    "out/test/test/security/permission-tests/RuleManagerComprehensive.test.js",
+    "out/test/test/security/permission-tests/CommandClassifierComprehensive.test.js",
+    "out/test/test/security/permission-tests/PermissionDialogComprehensive.test.js",
+    "out/test/test/security/permission-tests/CompletePermissionWorkflow.test.js"
+  ],
+  "require": ["src/test/setupTestEnv.js"],
+  "timeout": 10000,
+  "colors": true,
+  "reporter": "spec",
+  "exit": true
+}

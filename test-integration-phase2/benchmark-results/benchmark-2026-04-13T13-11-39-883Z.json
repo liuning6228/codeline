@@ -1,0 +1,226 @@
+{
+  "timestamp": "2026-04-13T13:11:39.883Z",
+  "suites": [
+    {
+      "name": "EnhancedEngineAdapter",
+      "tests": [
+        {
+          "name": "应该能够创建模拟依赖实例",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "模拟依赖应该具有正确的方法签名",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够注册和获取工具",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够按类别获取工具",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够执行工具",
+          "passed": true,
+          "time": 1
+        },
+        {
+          "name": "应该能够分析项目",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够获取文件上下文",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够生成提示词",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够解析响应",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够创建EnhancedEngineAdapter模拟实例",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该能够初始化并提交消息",
+          "passed": true,
+          "time": 101
+        }
+      ],
+      "passed": 11,
+      "failed": 0,
+      "time": 106
+    },
+    {
+      "name": "EnhancedEngineAdapterE2E",
+      "tests": [
+        {
+          "name": "应该成功初始化适配器",
+          "passed": true,
+          "time": 101
+        },
+        {
+          "name": "应该获取到EnhancedQueryEngine实例",
+          "passed": true,
+          "time": 100
+        },
+        {
+          "name": "应该获取到工具注册表",
+          "passed": true,
+          "time": 101
+        },
+        {
+          "name": "应该处理简单的消息",
+          "passed": true,
+          "time": 101
+        },
+        {
+          "name": "应该处理需要工具调用的消息",
+          "passed": true,
+          "time": 101
+        },
+        {
+          "name": "应该支持模式切换",
+          "passed": true,
+          "time": 101
+        },
+        {
+          "name": "应该支持对话导出导入",
+          "passed": true,
+          "time": 101
+        },
+        {
+          "name": "MCPHandler应该能够处理健康检查",
+          "passed": true,
+          "time": 202
+        },
+        {
+          "name": "MCPHandler应该能够获取工具列表",
+          "passed": true,
+          "time": 201
+        },
+        {
+          "name": "MCPHandler应该能够执行工具",
+          "passed": true,
+          "time": 403
+        },
+        {
+          "name": "应该演示完整的MCP-Adapter集成工作流",
+          "passed": true,
+          "time": 200
+        },
+        {
+          "name": "应该处理无效的导入数据",
+          "passed": true,
+          "time": 101
+        },
+        {
+          "name": "应该在重置后保持基本功能",
+          "passed": true,
+          "time": 101
+        }
+      ],
+      "passed": 13,
+      "failed": 0,
+      "time": 1921
+    },
+    {
+      "name": "complex-workflow",
+      "tests": [
+        {
+          "name": "应该完成完整的代码重构工作流",
+          "passed": true,
+          "time": 100
+        },
+        {
+          "name": "应该完成完整的项目设置工作流",
+          "passed": true,
+          "time": 202
+        },
+        {
+          "name": "应该处理错误并恢复工作流",
+          "passed": true,
+          "time": 201
+        },
+        {
+          "name": "应该完成复杂的多步骤集成工作流",
+          "passed": true,
+          "time": 402
+        }
+      ],
+      "passed": 4,
+      "failed": 0,
+      "time": 906
+    },
+    {
+      "name": "performance-benchmark",
+      "tests": [
+        {
+          "name": "应该测量初始化时间",
+          "passed": true,
+          "time": 1005
+        },
+        {
+          "name": "应该测量消息处理延迟",
+          "passed": true,
+          "time": 1
+        },
+        {
+          "name": "应该测量模式切换后的消息处理性能",
+          "passed": true,
+          "time": 0
+        },
+        {
+          "name": "应该测量工具调用延迟",
+          "passed": true,
+          "time": 1
+        },
+        {
+          "name": "应该测量并发消息处理能力",
+          "passed": true,
+          "time": 1506
+        },
+        {
+          "name": "应该评估内存使用趋势",
+          "passed": true,
+          "time": 1005
+        }
+      ],
+      "passed": 6,
+      "failed": 0,
+      "time": 3719
+    },
+    {
+      "name": "simple",
+      "tests": [
+        {
+          "name": "should pass",
+          "passed": true,
+          "time": 0
+        }
+      ],
+      "passed": 1,
+      "failed": 0,
+      "time": 2
+    }
+  ],
+  "totalTests": 35,
+  "passedTests": 35,
+  "failedTests": 0,
+  "totalTime": 6654,
+  "startTime": 1776085893229,
+  "endTime": 1776085899883
+}

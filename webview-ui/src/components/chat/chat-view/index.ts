@@ -1,12 +1,18 @@
 /**
- * Chat view barrel export
+ * Barrel export for chat-view utilities, hooks, components, and types
  */
 
-export { ChatView } from './ChatView';
-export * from './components/layout';
+// Export layout components
+export * from "./components/layout"
+// Export message components
+export * from "./components/messages"
+export * from "./constants"
 
-// Constants
-export const CHAT_CONSTANTS = {
-  MAX_IMAGES_AND_FILES_PER_MESSAGE: 20,
-  MAX_MESSAGE_LENGTH: 100000,
-};
+// Export hooks
+export * from "./hooks"
+// Export types and constants
+export * from "./types/chatTypes"
+// Export utilities
+export * from "./utils/markdownUtils"
+export * from "./utils/messageUtils"
+export * from "./utils/scrollUtils"

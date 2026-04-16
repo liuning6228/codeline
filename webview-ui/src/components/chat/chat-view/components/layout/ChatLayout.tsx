@@ -1,28 +1,40 @@
-/**
- * ChatLayout - Main chat layout component
- * Based on Cline's chat layout structure
- */
-
-import React from 'react';
+import type React from "react"
+import styled from "styled-components"
 
 interface ChatLayoutProps {
-  children: React.ReactNode;
-  isHidden?: boolean;
+	isHidden: boolean
+	children: React.ReactNode
 }
 
-export const ChatLayout: React.FC<ChatLayoutProps> = ({ children, isHidden }) => {
-  return (
-    <div
-      className={`flex flex-col h-full w-full ${
-        isHidden ? 'hidden' : ''
-      }`}
-      style={{
-        display: isHidden ? 'none' : 'flex',
-      }}
-    >
-      {children}
-    </div>
-  );
-};
+/**
+ * Main layout container for the chat view
+ * Provides the fixed positioning and flex layout structure
+ */
+export const ChatLayout: React.FC<ChatLayoutProps> = ({ isHidden, children }) => {
+	return (
+		<ChatLayoutContainer isHidden={isHidden}>
+			<MainContent>{children}</MainContent>
+		</ChatLayoutContainer>
+	)
+}
 
-export default ChatLayout;
+const ChatLayoutContainer = styled.div.withConfig({
+	shouldForwardProp: (prop) => !["isHidden"].includes(prop),
+})<{ isHidden: boolean }>`
+	display: ${(props) => (props.isHidden ? "none" : "grid")};
+	grid-template-rows: 1fr auto;
+	overflow: hidden;
+	padding: 0;
+	margin: 0;
+	width: 100%;
+	height: 100%;
+	min-height: 100vh;
+	position: relative;
+`
+
+const MainContent = styled.div`
+	display: flex;
+	flex-direction: column;
+	overflow: hidden;
+	grid-row: 1;
+`

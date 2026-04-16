@@ -28,4 +28,5 @@ export interface ModelConfig {
   autoApproveEdit?: boolean;
   autoApproveDelete?: boolean;
   autoApproveDelay?: number;
+  stop?: string[]; // 停止序列
 }

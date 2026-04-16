@@ -11,6 +11,13 @@ export class ModelAdapter {
   private isConfigured = false;
   private providerManager: ProviderManager;
 
+  /**
+   * 获取当前模型名称
+   */
+  public get modelName(): string {
+    return this.config.model;
+  }
+
   constructor() {
     // 初始化提供者管理器
     this.providerManager = new ProviderManager();

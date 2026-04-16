@@ -1,247 +1,399 @@
-import { useState, useRef, useEffect } from 'react'
-import ChatInput from './ChatInput'
-import MessageList from './MessageList'
-import ChatHeader from './ChatHeader'
-import TaskSection from '../task/TaskSection'
-import { useTaskState } from '../../hooks/useTaskState'
-import vscode from '../../lib/vscode'
-import { TaskEventUnion } from '../task/taskTypes'
+import { combineApiRequests } from "@shared/combineApiRequests"
+import { combineCommandSequences } from "@shared/combineCommandSequences"
+import { combineErrorRetryMessages } from "@shared/combineErrorRetryMessages"
+import { combineHookSequences } from "@shared/combineHookSequences"
+import { getApiMetrics, getLastApiReqTotalTokens } from "@shared/getApiMetrics"
+import { BooleanRequest, StringRequest } from "@shared/proto/cline/common"
+import { useCallback, useEffect, useMemo } from "react"
+import { useMount } from "react-use"
+import { normalizeApiConfiguration } from "@/components/settings/utils/providerUtils"
+import { useExtensionState } from "@/context/ExtensionStateContext"
+import { useShowNavbar } from "@/context/PlatformContext"
+import { GrpcAdapters } from "../../adapters/cline-to-vscode"
+import { Navbar } from "../menu/Navbar"
+import AutoApproveBar from "./auto-approve-menu/AutoApproveBar"
+// Import utilities and hooks from the new structure
+import {
+	ActionButtons,
+	CHAT_CONSTANTS,
+	ChatLayout,
+	convertHtmlToMarkdown,
+	filterVisibleMessages,
+	groupLowStakesTools,
+	groupMessages,
+	InputSection,
+	MessagesArea,
+	TaskSection,
+	useChatState,
+	useMessageHandlers,
+	useScrollBehavior,
+	WelcomeSection,
+} from "./chat-view"
 
-interface Message {
-  id: string
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  timestamp: Date
+interface ChatViewProps {
+	isHidden: boolean
+	showAnnouncement: boolean
+	hideAnnouncement: () => void
+	showHistoryView: () => void
 }
 
-const ChatView = () => {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      role: 'assistant',
-      content: 'Hello! I\'m CodeLine, your AI coding assistant. How can I help you today?',
-      timestamp: new Date()
-    }
-  ])
-  const [isProcessing, setIsProcessing] = useState(false)
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  
-  // 任务状态管理
-  const {
-    taskState,
-    handleTaskEvent,
-    startTask,
-    cancelTask,
-    retryStep,
-    clearTask,
-    setTaskDescription,
-  } = useTaskState()
+// Use constants from the imported module
+const MAX_IMAGES_AND_FILES_PER_MESSAGE = CHAT_CONSTANTS.MAX_IMAGES_AND_FILES_PER_MESSAGE
+const QUICK_WINS_HISTORY_THRESHOLD = 3
 
-  // 滚动到底部
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
+const ChatView = ({ isHidden, showAnnouncement, hideAnnouncement, showHistoryView }: ChatViewProps) => {
+	const showNavbar = useShowNavbar()
+	const {
+		version,
+		clineMessages: messages,
+		taskHistory,
+		apiConfiguration,
+		telemetrySetting,
+		mode,
+		userInfo,
+		currentFocusChainChecklist,
+		focusChainSettings,
+		hooksEnabled,
+	} = useExtensionState()
+	const isProdHostedApp = userInfo?.apiBaseUrl === "https://app.cline.bot"
+	const shouldShowQuickWins = isProdHostedApp && (!taskHistory || taskHistory.length < QUICK_WINS_HISTORY_THRESHOLD)
 
-  useEffect(() => {
-    scrollToBottom()
-  }, [messages])
+	//const task = messages.length > 0 ? (messages[0].say === "task" ? messages[0] : undefined) : undefined) : undefined
+	const task = useMemo(() => messages.at(0), [messages]) // leaving this less safe version here since if the first message is not a task, then the extension is in a bad state and needs to be debugged (see Cline.abort)
+	const modifiedMessages = useMemo(() => {
+		const slicedMessages = messages.slice(1)
+		// Only combine hook sequences if hooks are enabled
+		const withHooks = hooksEnabled ? combineHookSequences(slicedMessages) : slicedMessages
+		return combineErrorRetryMessages(combineApiRequests(combineCommandSequences(withHooks)))
+	}, [messages, hooksEnabled])
+	// has to be after api_req_finished are all reduced into api_req_started messages
+	const apiMetrics = useMemo(() => getApiMetrics(modifiedMessages), [modifiedMessages])
 
-  // 监听来自 VS Code 扩展的消息
-  useEffect(() => {
-    const handleMessage = (event: MessageEvent) => {
-      const message = event.data
-      console.log('Received message from VSCode:', message)
-      
-      switch (message.command) {
-        case 'taskResult':
-          // 处理任务结果
-          console.log('Task result:', message.result)
-          // 可以根据需要将任务结果添加到消息中
-          break
-          
-        case 'taskError':
-          // 处理任务错误
-          console.error('Task error:', message.error)
-          // 显示错误消息
-          break
-          
-        case 'task_event':
-          // 处理任务事件
-          if (message.event) {
-            handleTaskEvent(message.event as TaskEventUnion)
-          }
-          break
-          
-        case 'task_progress':
-          // 处理任务进度更新
-          console.log('Task progress:', message.progress, message.message)
-          // 可以更新进度显示
-          break
-          
-        case 'history':
-          // 处理历史记录
-          if (message.messages) {
-            setMessages(message.messages)
-          }
-          break
-          
-        case 'configUpdated':
-          // 处理配置更新
-          console.log('Config updated:', message.config)
-          break
-          
-        case 'typing':
-          // 处理打字指示器
-          setIsProcessing(message.isTyping || false)
-          break
-      }
-    }
+	const lastApiReqTotalTokens = useMemo(() => getLastApiReqTotalTokens(modifiedMessages) || undefined, [modifiedMessages])
 
-    window.addEventListener('message', handleMessage)
-    return () => {
-      window.removeEventListener('message', handleMessage)
-    }
-  }, [handleTaskEvent])
+	// Use custom hooks for state management
+	const chatState = useChatState(messages)
+	const {
+		setInputValue,
+		selectedImages,
+		setSelectedImages,
+		selectedFiles,
+		setSelectedFiles,
+		sendingDisabled,
+		enableButtons,
+		expandedRows,
+		setExpandedRows,
+		textAreaRef,
+	} = chatState
 
-  // 处理发送消息
-  const handleSendMessage = async (content: string) => {
-    if (!content.trim() || isProcessing) return
+	useEffect(() => {
+		const handleCopy = async (e: ClipboardEvent) => {
+			const targetElement = e.target as HTMLElement | null
+			// If the copy event originated from an input or textarea,
+			// let the default browser behavior handle it.
+			if (
+				targetElement &&
+				(targetElement.tagName === "INPUT" || targetElement.tagName === "TEXTAREA" || targetElement.isContentEditable)
+			) {
+				return
+			}
 
-    const userMessage: Message = {
-      id: Date.now().toString(),
-      role: 'user',
-      content,
-      timestamp: new Date()
-    }
+			if (window.getSelection) {
+				const selection = window.getSelection()
+				if (selection && selection.rangeCount > 0) {
+					const range = selection.getRangeAt(0)
+					const commonAncestor = range.commonAncestorContainer
+					let textToCopy: string | null = null
 
-    setMessages(prev => [...prev, userMessage])
-    setIsProcessing(true)
-    
-    // 通过 VS Code API 发送消息
-    vscode.sendMessage(content)
+					// Check if the selection is inside an element where plain text copy is preferred
+					let currentElement =
+						commonAncestor.nodeType === Node.ELEMENT_NODE
+							? (commonAncestor as HTMLElement)
+							: commonAncestor.parentElement
+					let preferPlainTextCopy = false
+					while (currentElement) {
+						if (currentElement.tagName === "PRE" && currentElement.querySelector("code")) {
+							preferPlainTextCopy = true
+							break
+						}
+						// Check computed white-space style
+						const computedStyle = window.getComputedStyle(currentElement)
+						if (
+							computedStyle.whiteSpace === "pre" ||
+							computedStyle.whiteSpace === "pre-wrap" ||
+							computedStyle.whiteSpace === "pre-line"
+						) {
+							// If the element itself or an ancestor has pre-like white-space,
+							// and the selection is likely contained within it, prefer plain text.
+							// This helps with elements like the TaskHeader's text display.
+							preferPlainTextCopy = true
+							break
+						}
 
-    // 检查消息是否看起来像任务描述
-    const isTaskDescription = content.length > 20 && (
-      content.toLowerCase().includes('create') ||
-      content.toLowerCase().includes('implement') ||
-      content.toLowerCase().includes('fix') ||
-      content.toLowerCase().includes('add') ||
-      content.toLowerCase().includes('refactor') ||
-      content.toLowerCase().includes('update')
-    )
-    
-    if (isTaskDescription && vscode.isInVSCode()) {
-      // 如果是任务描述，启动任务
-      setTaskDescription(content)
-      startTask(content)
-      
-      // 通过 VS Code API 执行任务
-      vscode.executeTask(content)
-    } else {
-      // 模拟 AI 回复（如果没有 VS Code 环境）
-      if (!vscode.isInVSCode()) {
-        setTimeout(() => {
-          const assistantMessage: Message = {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: `I received your message: "${content}". This is a simulated response. In the real implementation, this would connect to an AI model.`,
-            timestamp: new Date()
-          }
-          setMessages(prev => [...prev, assistantMessage])
-          setIsProcessing(false)
-        }, 1000)
-      }
-    }
-  }
+						// Stop searching if we reach a known chat message boundary or body
+						if (
+							currentElement.classList.contains("chat-row-assistant-message-container") ||
+							currentElement.classList.contains("chat-row-user-message-container") ||
+							currentElement.tagName === "BODY"
+						) {
+							break
+						}
+						currentElement = currentElement.parentElement
+					}
 
-  // 清除聊天记录
-  const handleClearChat = () => {
-    setMessages([
-      {
-        id: '1',
-        role: 'assistant',
-        content: 'Chat cleared. How can I help you today?',
-        timestamp: new Date()
-      }
-    ])
-    vscode.clearChat()
-  }
+					if (preferPlainTextCopy) {
+						// For code blocks or elements with pre-formatted white-space, get plain text.
+						textToCopy = selection.toString()
+					} else {
+						// For other content, use the existing HTML-to-Markdown conversion
+						const clonedSelection = range.cloneContents()
+						const div = document.createElement("div")
+						div.appendChild(clonedSelection)
+						const selectedHtml = div.innerHTML
+						textToCopy = await convertHtmlToMarkdown(selectedHtml)
+					}
 
-  // 处理任务取消
-  const handleCancelTask = () => {
-    if (vscode.isInVSCode()) {
-      // 通过 VS Code API 取消任务
-      // 注意：需要扩展支持取消命令
-      vscode.postMessage({
-        command: 'cancelTask',
-        taskId: taskState.taskId
-      })
-    }
-    cancelTask()
-  }
+					if (textToCopy !== null) {
+						try {
+							GrpcAdapters.FileServiceClient.copyToClipboard({ text: textToCopy }).catch((err) => {
+								console.error("Error copying to clipboard:", err)
+							})
+							e.preventDefault()
+						} catch (error) {
+							console.error("Error copying to clipboard:", error)
+						}
+					}
+				}
+			}
+		}
+		document.addEventListener("copy", handleCopy)
 
-  // 处理步骤重试
-  const handleRetryStep = (stepIndex: number) => {
-    if (vscode.isInVSCode()) {
-      // 通过 VS Code API 重试步骤
-      vscode.postMessage({
-        command: 'retryStep',
-        taskId: taskState.taskId,
-        stepIndex
-      })
-    }
-    retryStep(stepIndex)
-  }
+		return () => {
+			document.removeEventListener("copy", handleCopy)
+		}
+	}, [])
+	// Button state is now managed by useButtonState hook
 
-  // 处理清除任务
-  const handleClearTask = () => {
-    clearTask()
-  }
+	// handleFocusChange is already provided by chatState
 
-  return (
-    <div className="flex h-full flex-col">
-      <ChatHeader onClearChat={handleClearChat} />
-      
-      <div className="flex-1 overflow-auto">
-        {/* 消息列表 */}
-        <div className="p-4">
-          <MessageList messages={messages} />
-          {isProcessing && (
-            <div className="flex items-center space-x-2 p-4 text-gray-400">
-              <div className="h-2 w-2 animate-pulse rounded-full bg-primary"></div>
-              <div className="h-2 w-2 animate-pulse rounded-full bg-primary" style={{ animationDelay: '0.2s' }}></div>
-              <div className="h-2 w-2 animate-pulse rounded-full bg-primary" style={{ animationDelay: '0.4s' }}></div>
-              <span className="ml-2 text-sm">Thinking...</span>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
-        
-        {/* 任务区域 */}
-        <TaskSection
-          taskState={taskState}
-          config={{
-            showProgressBar: true,
-            showStepsList: true,
-            showEventsLog: true,
-            autoScroll: true,
-            maxVisibleSteps: 5,
-            maxVisibleEvents: 10,
-          }}
-          onCancelTask={handleCancelTask}
-          onRetryStep={handleRetryStep}
-          onClearTask={handleClearTask}
-        />
-      </div>
+	// Use message handlers hook
+	const messageHandlers = useMessageHandlers(messages, chatState)
 
-      <div className="border-t border-border p-4">
-        <ChatInput 
-          onSendMessage={handleSendMessage} 
-          disabled={isProcessing}
-        />
-      </div>
-    </div>
-  )
+	const { selectedModelInfo } = useMemo(() => {
+		return normalizeApiConfiguration(apiConfiguration, mode)
+	}, [apiConfiguration, mode])
+
+	const selectFilesAndImages = useCallback(async () => {
+		try {
+			const response = await FileServiceClient.selectFiles(
+				BooleanRequest.create({
+					value: selectedModelInfo.supportsImages,
+				}),
+			)
+			if (
+				response &&
+				response.values1 &&
+				response.values2 &&
+				(response.values1.length > 0 || response.values2.length > 0)
+			) {
+				const currentTotal = selectedImages.length + selectedFiles.length
+				const availableSlots = MAX_IMAGES_AND_FILES_PER_MESSAGE - currentTotal
+
+				if (availableSlots > 0) {
+					// Prioritize images first
+					const imagesToAdd = Math.min(response.values1.length, availableSlots)
+					if (imagesToAdd > 0) {
+						setSelectedImages((prevImages) => [...prevImages, ...response.values1.slice(0, imagesToAdd)])
+					}
+
+					// Use remaining slots for files
+					const remainingSlots = availableSlots - imagesToAdd
+					if (remainingSlots > 0) {
+						setSelectedFiles((prevFiles) => [...prevFiles, ...response.values2.slice(0, remainingSlots)])
+					}
+				}
+			}
+		} catch (error) {
+			console.error("Error selecting images & files:", error)
+		}
+	}, [selectedModelInfo.supportsImages])
+
+	const shouldDisableFilesAndImages = selectedImages.length + selectedFiles.length >= MAX_IMAGES_AND_FILES_PER_MESSAGE
+
+	// Subscribe to show webview events from the backend
+	useEffect(() => {
+		const cleanup = UiServiceClient.subscribeToShowWebview(
+			{},
+			{
+				onResponse: (event) => {
+					// Only focus if not hidden and preserveEditorFocus is false
+					if (!isHidden && !event.preserveEditorFocus) {
+						textAreaRef.current?.focus()
+					}
+				},
+				onError: (error) => {
+					console.error("Error in showWebview subscription:", error)
+				},
+				onComplete: () => {
+					console.log("showWebview subscription completed")
+				},
+			},
+		)
+
+		return cleanup
+	}, [isHidden])
+
+	// Set up addToInput subscription
+	useEffect(() => {
+		const cleanup = UiServiceClient.subscribeToAddToInput(
+			{},
+			{
+				onResponse: (event) => {
+					if (event.value) {
+						setInputValue((prevValue) => {
+							const newText = event.value
+							const newTextWithNewline = newText + "\n"
+							return prevValue ? `${prevValue}\n${newTextWithNewline}` : newTextWithNewline
+						})
+						// Add scroll to bottom after state update
+						// Auto focus the input and start the cursor on a new line for easy typing
+						setTimeout(() => {
+							if (textAreaRef.current) {
+								textAreaRef.current.scrollTop = textAreaRef.current.scrollHeight
+								textAreaRef.current.focus()
+							}
+						}, 0)
+					}
+				},
+				onError: (error) => {
+					console.error("Error in addToInput subscription:", error)
+				},
+				onComplete: () => {
+					console.log("addToInput subscription completed")
+				},
+			},
+		)
+
+		return cleanup
+	}, [])
+
+	useMount(() => {
+		// NOTE: the vscode window needs to be focused for this to work
+		textAreaRef.current?.focus()
+	})
+
+	useEffect(() => {
+		const timer = setTimeout(() => {
+			if (!isHidden && !sendingDisabled && !enableButtons) {
+				textAreaRef.current?.focus()
+			}
+		}, 50)
+		return () => {
+			clearTimeout(timer)
+		}
+	}, [isHidden, sendingDisabled, enableButtons])
+
+	const visibleMessages = useMemo(() => {
+		return filterVisibleMessages(modifiedMessages)
+	}, [modifiedMessages])
+
+	const lastProgressMessageText = useMemo(() => {
+		if (!focusChainSettings.enabled) {
+			return undefined
+		}
+
+		// First check if we have a current focus chain list from the extension state
+		if (currentFocusChainChecklist) {
+			return currentFocusChainChecklist
+		}
+
+		// Fall back to the last task_progress message if no state focus chain list
+		const lastProgressMessage = [...modifiedMessages].reverse().find((message) => message.say === "task_progress")
+		return lastProgressMessage?.text
+	}, [focusChainSettings.enabled, modifiedMessages, currentFocusChainChecklist])
+
+	const showFocusChainPlaceholder = useMemo(() => {
+		// Show placeholder whenever focus chain is enabled and no checklist exists yet.
+		return focusChainSettings.enabled && !lastProgressMessageText
+	}, [focusChainSettings.enabled, lastProgressMessageText])
+
+	const groupedMessages = useMemo(() => {
+		return groupLowStakesTools(groupMessages(visibleMessages))
+	}, [visibleMessages])
+
+	// Use scroll behavior hook
+	const scrollBehavior = useScrollBehavior(messages, visibleMessages, groupedMessages, expandedRows, setExpandedRows)
+
+	const placeholderText = useMemo(() => {
+		const text = task ? "Type a message..." : "Type your task here..."
+		return text
+	}, [task])
+
+	return (
+		<ChatLayout isHidden={isHidden}>
+			<div className="flex flex-col flex-1 overflow-hidden">
+				{showNavbar && <Navbar />}
+				{task ? (
+					<TaskSection
+						apiMetrics={apiMetrics}
+						lastApiReqTotalTokens={lastApiReqTotalTokens}
+						lastProgressMessageText={lastProgressMessageText}
+						messageHandlers={messageHandlers}
+						selectedModelInfo={{
+							supportsPromptCache: selectedModelInfo.supportsPromptCache,
+							supportsImages: selectedModelInfo.supportsImages || false,
+						}}
+						showFocusChainPlaceholder={showFocusChainPlaceholder}
+						task={task}
+					/>
+				) : (
+					<WelcomeSection
+						hideAnnouncement={hideAnnouncement}
+						shouldShowQuickWins={shouldShowQuickWins}
+						showAnnouncement={showAnnouncement}
+						showHistoryView={showHistoryView}
+						taskHistory={taskHistory}
+						telemetrySetting={telemetrySetting}
+						version={version}
+					/>
+				)}
+				{task && (
+					<MessagesArea
+						chatState={chatState}
+						groupedMessages={groupedMessages}
+						messageHandlers={messageHandlers}
+						modifiedMessages={modifiedMessages}
+						scrollBehavior={scrollBehavior}
+						task={task}
+					/>
+				)}
+			</div>
+			<footer className="bg-(--vscode-sidebar-background)" style={{ gridRow: "2" }}>
+				<AutoApproveBar />
+				<ActionButtons
+					chatState={chatState}
+					messageHandlers={messageHandlers}
+					messages={messages}
+					mode={mode}
+					scrollBehavior={{
+						scrollToBottomSmooth: scrollBehavior.scrollToBottomSmooth,
+						disableAutoScrollRef: scrollBehavior.disableAutoScrollRef,
+						showScrollToBottom: scrollBehavior.showScrollToBottom,
+						virtuosoRef: scrollBehavior.virtuosoRef,
+					}}
+					task={task}
+				/>
+				<InputSection
+					chatState={chatState}
+					messageHandlers={messageHandlers}
+					placeholderText={placeholderText}
+					scrollBehavior={scrollBehavior}
+					selectFilesAndImages={selectFilesAndImages}
+					shouldDisableFilesAndImages={shouldDisableFilesAndImages}
+				/>
+			</footer>
+		</ChatLayout>
+	)
 }
 
 export default ChatView

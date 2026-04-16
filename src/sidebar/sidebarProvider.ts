@@ -1,10 +1,15 @@
 import * as vscode from 'vscode';
+import * as fs from 'fs';
+import * as path from 'path';
 import { TaskEngine, TaskResult, TaskStep } from '../task/taskEngine';
 import { DiffViewer, ChangedFile } from '../diff/diffViewer';
 import { FileManager, FileDiff } from '../file/fileManager';
 import { createPermissionManager } from '../auth/PermissionManager';
 import { AutoApprovalSettings } from '../auth/PermissionManager';
 import { getWebviewContent } from './webviewContent';
+import { EnhancedQueryEngine, EnhancedQueryEngineConfig, ConversationState } from '../core/EnhancedQueryEngine';
+import { EnhancedToolRegistry } from '../core/tool/EnhancedToolRegistry';
+import GRPCStreamAdapter, { GRPCConnection } from '../communication/GRPCStreamAdapter';
 
 /**
  * 待处理的文件差异
@@ -22,12 +27,21 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
     private _view?: vscode.WebviewView;
     private _extension: any;
     private _currentView: string = 'chat';
+    private _currentMode: string = 'act'; // 新增：当前模式（act/plan）
     
     // 新增：任务引擎和权限管理
     private _taskEngine: TaskEngine | null = null;
     private _permissionManager = createPermissionManager();
     private _fileManager: FileManager | null = null;
     private _pendingDiffs: Map<string, PendingDiff> = new Map();
+    
+    // 新增：增强查询引擎
+    private _enhancedQueryEngine: EnhancedQueryEngine | null = null;
+    private _toolRegistry: EnhancedToolRegistry | null = null;
+    
+    // 新增：GRPC流式通信
+    private _grpcAdapter: GRPCStreamAdapter | null = null;
+    private _grpcConnection: GRPCConnection | null = null;
     
     // 自动批准设置
     private _autoApprovalSettings: AutoApprovalSettings = {
@@ -68,6 +82,20 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
     }
     
     /**
+     * 设置增强查询引擎
+     */
+    public setEnhancedQueryEngine(engine: EnhancedQueryEngine): void {
+        this._enhancedQueryEngine = engine;
+    }
+    
+    /**
+     * 设置工具注册表
+     */
+    public setToolRegistry(registry: EnhancedToolRegistry): void {
+        this._toolRegistry = registry;
+    }
+    
+    /**
      * 加载自动批准设置
      */
     private loadAutoApprovalSettings(context: vscode.ExtensionContext): void {
@@ -85,22 +113,52 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
         this._permissionManager.setAutoApprovalSettings(this._autoApprovalSettings);
     }
     
-    public resolveWebviewView(
+    public async resolveWebviewView(
         webviewView: vscode.WebviewView,
         context: vscode.WebviewViewResolveContext,
         _token: vscode.CancellationToken
     ) {
         this._view = webviewView;
         
+        // 获取构建目录的URI
+        let buildDir: vscode.Uri;
+        if (this._extension?.context?.extensionPath) {
+            // 如果有扩展上下文，使用扩展路径
+            const extensionPath = this._extension.context.extensionPath;
+            buildDir = vscode.Uri.joinPath(vscode.Uri.file(extensionPath), 'webview-ui', 'build');
+        } else {
+            // 否则，从当前文件位置计算相对路径
+            // 当前文件：/home/liuning/workspace/codeline/src/sidebar/sidebarProvider.ts
+            // 构建目录：/home/liuning/workspace/codeline/webview-ui/build
+            const relativeBuildPath = path.join(__dirname, '..', '..', 'webview-ui', 'build');
+            buildDir = vscode.Uri.file(relativeBuildPath);
+        }
+        
         webviewView.webview.options = {
             enableScripts: true,
-            localResourceRoots: []
+            localResourceRoots: [buildDir]
         };
         
-        webviewView.webview.html = this._getWebviewContent();
+        // 加载构建的index.html
+        const indexPath = vscode.Uri.joinPath(buildDir, 'index.html');
+        const htmlContent = await this._loadHtmlFromFile(indexPath, webviewView.webview);
+        webviewView.webview.html = htmlContent;
+        
+        // 初始化GRPC适配器（延迟加载）
+        this.initializeGRPCAdapter().catch(error => {
+            console.warn('GRPC适配器初始化失败，将继续使用降级模式:', error);
+        });
         
         webviewView.webview.onDidReceiveMessage(async (message) => {
             console.log('Sidebar收到消息:', message);
+            
+            // 处理GRPC请求（Cline UI兼容）
+            if (message.type === 'grpc_request' && message.grpc_request) {
+                await this.handleGrpcRequest(message.grpc_request, webviewView);
+                return;
+            }
+            
+            // 原有命令处理
             switch (message.command) {
                 case 'sendMessage':
                     await this.handleSendMessage(message.text, webviewView);
@@ -152,6 +210,113 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
                 case 'setYoloMode':
                     await this.handleSetYoloMode(message.enabled, webviewView);
                     break;
+                // 适配器命令处理
+                case 'file.openRelativePath':
+                    await this.handleFileOpenRelativePath(message.data?.path, message.messageId, webviewView);
+                    break;
+                case 'file.selectFiles':
+                    await this.handleFileSelectFiles(message.data?.supportsImages, message.messageId, webviewView);
+                    break;
+                case 'file.copyToClipboard':
+                    await this.handleFileCopyToClipboard(message.data?.text, message.messageId, webviewView);
+                    break;
+                case 'file.read':
+                    await this.handleFileRead(message.data?.path, message.messageId, webviewView);
+                    break;
+                case 'file.write':
+                    await this.handleFileWrite(message.data?.path, message.data?.content, message.messageId, webviewView);
+                    break;
+                case 'file.list':
+                    await this.handleFileList(message.data?.path, message.messageId, webviewView);
+                    break;
+                case 'ui.showAnnouncement':
+                    await this.handleUiShowAnnouncement(message.messageId, webviewView);
+                    break;
+                case 'ui.navigate':
+                    await this.handleUiNavigate(message.data?.view, message.data?.data, message.messageId, webviewView);
+                    break;
+                case 'state.dismissBanner':
+                    await this.handleStateDismissBanner(message.data?.value, message.messageId, webviewView);
+                    break;
+                case 'tool.execute':
+                    await this.handleToolExecute(message.data?.toolName, message.data?.params, message.messageId, webviewView);
+                    break;
+                case 'tool.cancel':
+                    await this.handleToolCancel(message.data?.executionId, message.messageId, webviewView);
+                    break;
+                case 'tool.list':
+                    await this.handleToolList(message.messageId, webviewView);
+                    break;
+                // 新增适配器命令处理
+                case 'account.getUserOrganizations':
+                    await this.handleAccountGetUserOrganizations(message.data, message.messageId, webviewView);
+                    break;
+                case 'account.loginClicked':
+                    await this.handleAccountLoginClicked(message.data, message.messageId, webviewView);
+                    break;
+                case 'account.logoutClicked':
+                    await this.handleAccountLogoutClicked(message.data, message.messageId, webviewView);
+                    break;
+                case 'account.authStateChanged':
+                    await this.handleAccountAuthStateChanged(message.data, message.messageId, webviewView);
+                    break;
+                case 'account.getUserCredits':
+                    await this.handleAccountGetUserCredits(message.data, message.messageId, webviewView);
+                    break;
+                case 'account.getOrganizationCredits':
+                    await this.handleAccountGetOrganizationCredits(message.data, message.messageId, webviewView);
+                    break;
+                case 'account.setUserOrganization':
+                    await this.handleAccountSetUserOrganization(message.data, message.messageId, webviewView);
+                    break;
+                case 'account.getRedirectUrl':
+                    await this.handleAccountGetRedirectUrl(message.data, message.messageId, webviewView);
+                    break;
+                case 'account.openAiCodexSignIn':
+                    await this.handleAccountOpenAiCodexSignIn(message.data, message.messageId, webviewView);
+                    break;
+                case 'account.openAiCodexSignOut':
+                    await this.handleAccountOpenAiCodexSignOut(message.data, message.messageId, webviewView);
+                    break;
+                case 'mcp.getMarketplaceCatalog':
+                    await this.handleMcpGetMarketplaceCatalog(message.data, message.messageId, webviewView);
+                    break;
+                case 'mcp.getServer':
+                    await this.handleMcpGetServer(message.data, message.messageId, webviewView);
+                    break;
+                case 'models.getModels':
+                    await this.handleModelsGetModels(message.data, message.messageId, webviewView);
+                    break;
+                case 'models.getDefaultModel':
+                    await this.handleModelsGetDefaultModel(message.data, message.messageId, webviewView);
+                    break;
+                case 'slash.executeCommand':
+                    await this.handleSlashExecuteCommand(message.data, message.messageId, webviewView);
+                    break;
+                case 'checkpoints.list':
+                    await this.handleCheckpointsList(message.data, message.messageId, webviewView);
+                    break;
+                case 'oca.signIn':
+                    await this.handleOcaSignIn(message.data, message.messageId, webviewView);
+                    break;
+                case 'oca.signOut':
+                    await this.handleOcaSignOut(message.data, message.messageId, webviewView);
+                    break;
+                case 'web.openUrl':
+                    await this.handleWebOpenUrl(message.data, message.messageId, webviewView);
+                    break;
+                case 'web.capturePage':
+                    await this.handleWebCapturePage(message.data, message.messageId, webviewView);
+                    break;
+                case 'browser.getConnectionInfo':
+                    await this.handleBrowserGetConnectionInfo(message.data, message.messageId, webviewView);
+                    break;
+                case 'worktree.list':
+                    await this.handleWorktreeList(message.data, message.messageId, webviewView);
+                    break;
+                case 'worktree.trackViewOpened':
+                    await this.handleWorktreeTrackViewOpened(message.data, message.messageId, webviewView);
+                    break;
             }
         });
     }
@@ -176,8 +341,31 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
                 isProcessing: true
             });
             
-            // 优先使用TaskEngine执行任务（支持文件操作和权限检查）
-            if (this._taskEngine) {
+            // 优先级1: 使用增强查询引擎（如果可用且启用）
+            if (this._enhancedQueryEngine && this._enhancedQueryEngine.getMode() === 'act') {
+                console.log('使用EnhancedQueryEngine处理消息...');
+                const result = await this._enhancedQueryEngine.submitMessageSync(text);
+                
+                if (result.success && result.message) {
+                    // 显示结果
+                    webviewView.webview.postMessage({
+                        command: 'addMessage',
+                        role: 'assistant',
+                        content: result.message.content,
+                        id: (Date.now() + 1).toString(),
+                        timestamp: new Date(),
+                        thinking: result.thinking,
+                        toolCalls: result.toolCalls,
+                        mode: this._enhancedQueryEngine.getMode()
+                    });
+                } else {
+                    // 回退到TaskEngine
+                    console.log('EnhancedQueryEngine处理失败，回退到TaskEngine');
+                    await this.fallbackToTaskEngine(text, webviewView);
+                }
+            }
+            // 优先级2: 使用TaskEngine执行任务（支持文件操作和权限检查）
+            else if (this._taskEngine) {
                 console.log('使用TaskEngine执行任务...');
                 const result = await this.executeTaskWithPermissionCheck(text, webviewView);
                 
@@ -422,6 +610,109 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
         }
     }
     
+    /**
+     * 初始化GRPC适配器
+     */
+    private async initializeGRPCAdapter(): Promise<void> {
+        if (this._grpcAdapter) {
+            return;
+        }
+        
+        try {
+            this._grpcAdapter = GRPCStreamAdapter.getInstance();
+            
+            // 创建连接ID（基于扩展和会话）
+            const connectionId = `codeline-sidebar-${Date.now()}`;
+            
+            // 创建GRPC连接
+            this._grpcConnection = await this._grpcAdapter.createGRPCConnection(connectionId);
+            
+            // 监听连接事件
+            this._grpcConnection.on('state:changed', ({ oldState, newState }) => {
+                console.log(`GRPC连接状态变更: ${oldState} -> ${newState}`);
+            });
+            
+            this._grpcConnection.on('service:event', ({ service, method, data }) => {
+                console.log(`GRPC服务事件: ${service}.${method}`, data);
+            });
+            
+            this._grpcConnection.on('event', (data) => {
+                console.log('GRPC通用事件:', data);
+            });
+            
+            console.log('✅ GRPC适配器初始化成功');
+            
+        } catch (error) {
+            console.error('❌ GRPC适配器初始化失败:', error);
+            this._grpcAdapter = null;
+            this._grpcConnection = null;
+            throw error;
+        }
+    }
+    
+    /**
+     * 获取GRPC适配器
+     */
+    private async getGRPCAdapter(): Promise<GRPCStreamAdapter | null> {
+        if (!this._grpcAdapter) {
+            try {
+                await this.initializeGRPCAdapter();
+            } catch {
+                // 初始化失败，返回null
+            }
+        }
+        return this._grpcAdapter;
+    }
+    
+    /**
+     * 获取GRPC连接
+     */
+    private async getGRPCConnection(): Promise<GRPCConnection | null> {
+        if (!this._grpcConnection) {
+            const adapter = await this.getGRPCAdapter();
+            if (!adapter) {
+                return null;
+            }
+        }
+        return this._grpcConnection;
+    }
+    
+    /**
+     * 回退到TaskEngine处理消息
+     */
+    private async fallbackToTaskEngine(text: string, webviewView: vscode.WebviewView): Promise<void> {
+        try {
+            console.log('使用TaskEngine回退处理...');
+            const result = await this.executeTaskWithPermissionCheck(text, webviewView);
+            
+            // 显示结果
+            webviewView.webview.postMessage({
+                command: 'addMessage',
+                role: 'assistant',
+                content: result.output || result.error || '任务执行完成',
+                id: (Date.now() + 1).toString(),
+                timestamp: new Date(),
+                steps: result.steps,
+                pendingDiffs: Array.from(this._pendingDiffs.entries()).map(([id, diff]) => ({
+                    diffId: id,
+                    filePath: diff.filePath,
+                    summary: diff.diff.summary
+                }))
+            });
+        } catch (error: any) {
+            console.error('TaskEngine回退处理失败:', error);
+            // 最终回退到简单AI回复
+            const reply = await this.getAIResponse(text);
+            webviewView.webview.postMessage({
+                command: 'addMessage',
+                role: 'assistant',
+                content: reply,
+                id: (Date.now() + 1).toString(),
+                timestamp: new Date()
+            });
+        }
+    }
+    
     private updateView(webviewView: vscode.WebviewView) {
         console.log('更新视图到:', this._currentView);
         // 发送视图更新消息到WebView
@@ -444,7 +735,25 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
     
     private async handleRequestState(webviewView: vscode.WebviewView) {
         try {
-            const mode = await this._extension.getMode();
+            // 优先使用增强查询引擎的状态
+            let mode = 'act';
+            let enhancedState = null;
+            
+            if (this._enhancedQueryEngine) {
+                mode = this._enhancedQueryEngine.getMode();
+                const engineState = this._enhancedQueryEngine.getState();
+                enhancedState = {
+                    hasEnhancedEngine: true,
+                    turnCount: engineState.turnCount,
+                    messageCount: engineState.messages.length,
+                    toolCallCount: engineState.toolCalls.length,
+                    usage: engineState.usage
+                };
+            } else {
+                // 回退到扩展模式
+                mode = await this._extension.getMode();
+            }
+            
             const config = this._extension.getConfig();
             
             webviewView.webview.postMessage({
@@ -455,7 +764,8 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
                         providerId: config.provider || 'unknown',
                         modelId: config.model || 'unknown'
                     } : undefined,
-                    version: '0.2.0'
+                    version: '0.2.0',
+                    enhancedState
                 }
             });
         } catch (error) {
@@ -693,6 +1003,583 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
         }
     }
     
+    /**
+     * 处理GRPC请求（Cline UI兼容）
+     */
+    private async handleGrpcRequest(grpcRequest: any, webviewView: vscode.WebviewView): Promise<void> {
+        console.log('处理GRPC请求:', grpcRequest);
+        const { service, method, message, request_id, is_streaming } = grpcRequest;
+        
+        // 优先级1: 尝试使用GRPC适配器（如果可用且不是流式方法）
+        if (!is_streaming) {
+            const grpcConnection = await this.getGRPCConnection();
+            if (grpcConnection && grpcConnection.getState() === 'connected') {
+                try {
+                    const grpcResponse = await grpcConnection.call(service, method, message, {
+                        timeout: 30000,
+                    });
+                    
+                    // 发送GRPC响应
+                    webviewView.webview.postMessage({
+                        type: 'grpc_response',
+                        grpc_response: {
+                            request_id,
+                            message: grpcResponse.data || {},
+                            metadata: grpcResponse.metadata,
+                            is_streaming: false
+                        }
+                    });
+                    
+                    return;
+                } catch (grpcError: any) {
+                    console.warn('GRPC适配器调用失败，回退到本地处理:', grpcError.message);
+                    // 继续使用本地处理
+                }
+            }
+        }
+        
+        // 优先级2: 使用本地处理
+        try {
+            // 根据service和method路由到相应的处理函数
+            let response: any;
+            let error: string | undefined;
+            
+            // UiService 方法映射
+            if (service === 'UiService') {
+                switch (method) {
+                    case 'onDidShowAnnouncement':
+                        response = { value: true };
+                        break;
+                    case 'initializeWebview':
+                        response = {};
+                        break;
+                    case 'getWebviewHtml':
+                        response = { value: this._getWebviewContent() };
+                        break;
+                    case 'openUrl':
+                        if (message && message.value) {
+                            vscode.env.openExternal(vscode.Uri.parse(message.value));
+                        }
+                        response = {};
+                        break;
+                    case 'scrollToSettings':
+                        // 暂时返回成功
+                        response = { key: 'scroll', value: 'success' };
+                        break;
+                    default:
+                        // 对于流式方法，返回空响应
+                        if (method.startsWith('subscribeTo')) {
+                            response = {};
+                        } else {
+                            response = await this.mapGrpcToCommand(service, method, message, webviewView);
+                        }
+                }
+            }
+            // StateService 方法映射
+            else if (service === 'StateService') {
+                switch (method) {
+                    case 'dismissBanner':
+                        response = { success: true };
+                        break;
+                    case 'getLatestState':
+                        // 返回模拟状态（包含增强引擎信息）
+                        response = await this.getSimulatedState();
+                        break;
+                    case 'updateSettings':
+                        // 暂时返回成功
+                        response = {};
+                        break;
+                    case 'togglePlanActModeProto':
+                        // 切换计划/行动模式（支持增强查询引擎）
+                        response = { value: await this.toggleModeWithEnhancedEngine() };
+                        break;
+                    default:
+                        response = await this.mapGrpcToCommand(service, method, message, webviewView);
+                }
+            }
+            // EnhancedEngineService 方法映射（新增）
+            else if (service === 'EnhancedEngineService') {
+                switch (method) {
+                    case 'getEnhancedEngineStatus':
+                        response = await this.getEnhancedEngineStatus();
+                        break;
+                    case 'toggleEnhancedEngineMode':
+                        if (this._enhancedQueryEngine) {
+                            const currentMode = this._enhancedQueryEngine.getMode();
+                            const newMode = currentMode === 'act' ? 'plan' : 'act';
+                            this._enhancedQueryEngine.setMode(newMode);
+                            response = { success: true, mode: newMode };
+                        } else {
+                            response = { success: false, error: 'Enhanced engine not available' };
+                        }
+                        break;
+                    case 'getEnhancedEngineState':
+                        response = await this.getEnhancedEngineDetailedState();
+                        break;
+                    case 'clearEnhancedEngineConversation':
+                        if (this._enhancedQueryEngine) {
+                            this._enhancedQueryEngine.clear();
+                            response = { success: true };
+                        } else {
+                            response = { success: false, error: 'Enhanced engine not available' };
+                        }
+                        break;
+                    case 'exportEnhancedEngineConversation':
+                        if (this._enhancedQueryEngine) {
+                            const exportData = this._enhancedQueryEngine.exportConversation();
+                            response = { success: true, exportData };
+                        } else {
+                            response = { success: false, error: 'Enhanced engine not available' };
+                        }
+                        break;
+                    default:
+                        response = { success: false, error: `Method ${method} not supported for EnhancedEngineService` };
+                }
+            }
+            // 未知服务
+            else {
+                response = await this.mapGrpcToCommand(service, method, message, webviewView);
+            }
+            
+            // 发送GRPC响应
+            webviewView.webview.postMessage({
+                type: 'grpc_response',
+                grpc_response: {
+                    request_id,
+                    message: response,
+                    error,
+                    is_streaming: false
+                }
+            });
+        } catch (err: any) {
+            console.error('处理GRPC请求时出错:', err);
+            webviewView.webview.postMessage({
+                type: 'grpc_response',
+                grpc_response: {
+                    request_id,
+                    error: err.message || '未知错误',
+                    is_streaming: false
+                }
+            });
+        }
+    }
+    
+    /**
+     * 将GRPC请求映射到现有命令或增强查询引擎
+     */
+    private async mapGrpcToCommand(service: string, method: string, message: any, webviewView: vscode.WebviewView): Promise<any> {
+        console.log(`映射GRPC请求: ${service}.${method}`, message);
+        
+        // 尝试将GRPC方法映射到增强查询引擎操作
+        if (this._enhancedQueryEngine) {
+            const result = await this.mapToEnhancedEngine(service, method, message, webviewView);
+            if (result.handled) {
+                return result.response;
+            }
+        }
+        
+        // 默认映射：尝试将GRPC方法映射到现有CodeLine命令
+        switch (service) {
+            case 'UiService':
+                return await this.mapUiService(method, message, webviewView);
+            case 'StateService':
+                return await this.mapStateService(method, message, webviewView);
+            case 'QueryService':
+                return await this.mapQueryService(method, message, webviewView);
+            default:
+                console.warn(`未知的GRPC服务: ${service}`);
+                return {};
+        }
+    }
+    
+    /**
+     * 映射到增强查询引擎
+     */
+    private async mapToEnhancedEngine(service: string, method: string, message: any, webviewView: vscode.WebviewView): Promise<{ handled: boolean; response: any }> {
+        try {
+            switch (service) {
+                case 'UiService':
+                    switch (method) {
+                        case 'onDidShowAnnouncement':
+                            return { handled: true, response: { value: true } };
+                        case 'initializeWebview':
+                            return { handled: true, response: {} };
+                        case 'getWebviewHtml':
+                            return { handled: true, response: { value: this._getWebviewContent() } };
+                        case 'openUrl':
+                            if (message && message.value) {
+                                vscode.env.openExternal(vscode.Uri.parse(message.value));
+                            }
+                            return { handled: true, response: {} };
+                    }
+                    break;
+                    
+                case 'StateService':
+                    switch (method) {
+                        case 'getLatestState':
+                            const state = await this.getSimulatedState();
+                            return { handled: true, response: state };
+                        case 'dismissBanner':
+                            return { handled: true, response: { success: true } };
+                        case 'updateSettings':
+                            // TODO: 实现设置更新
+                            return { handled: true, response: {} };
+                        case 'togglePlanActModeProto':
+                            const isPlanMode = await this.toggleMode();
+                            return { handled: true, response: { value: isPlanMode } };
+                    }
+                    break;
+                    
+                case 'QueryService':
+                    switch (method) {
+                        case 'submitMessage':
+                            if (message && message.value) {
+                                // 这里可以调用增强查询引擎，但为了避免阻塞，暂时返回成功
+                                return { handled: true, response: { success: true, messageId: `msg-${Date.now()}` } };
+                            }
+                            break;
+                    }
+                    break;
+            }
+        } catch (error: any) {
+            console.error(`映射到增强引擎失败: ${error.message}`);
+        }
+        
+        return { handled: false, response: {} };
+    }
+    
+    /**
+     * 映射UiService方法
+     */
+    private async mapUiService(method: string, message: any, webviewView: vscode.WebviewView): Promise<any> {
+        switch (method) {
+            case 'openUrl':
+                if (message && message.value) {
+                    vscode.env.openExternal(vscode.Uri.parse(message.value));
+                }
+                return {};
+            case 'showInformationMessage':
+                if (message && message.value) {
+                    vscode.window.showInformationMessage(message.value);
+                }
+                return {};
+            default:
+                console.warn(`未实现的UiService方法: ${method}`);
+                return {};
+        }
+    }
+    
+    /**
+     * 映射StateService方法
+     */
+    private async mapStateService(method: string, message: any, webviewView: vscode.WebviewView): Promise<any> {
+        switch (method) {
+            case 'getLatestState':
+                return await this.handleRequestState(webviewView);
+            case 'updateSettings':
+                // TODO: 实现设置更新
+                console.log('StateService.updateSettings called:', message);
+                return {};
+            default:
+                console.warn(`未实现的StateService方法: ${method}`);
+                return {};
+        }
+    }
+    
+    /**
+     * 映射QueryService方法
+     */
+    private async mapQueryService(method: string, message: any, webviewView: vscode.WebviewView): Promise<any> {
+        switch (method) {
+            case 'submitMessage':
+                if (message && message.value) {
+                    // 处理消息提交
+                    await this.handleSendMessage(message.value, webviewView);
+                    return { success: true, messageId: `msg-${Date.now()}` };
+                }
+                break;
+            case 'cancelMessage':
+                if (message && message.messageId) {
+                    // 取消消息处理
+                    console.log(`取消消息: ${message.messageId}`);
+                    return { success: true };
+                }
+                break;
+            default:
+                console.warn(`未实现的QueryService方法: ${method}`);
+                return {};
+        }
+        return {};
+    }
+    
+    /**
+     * 获取模拟状态（临时实现）
+     */
+    private async getSimulatedState(): Promise<any> {
+        // 如果有增强查询引擎，返回其真实状态
+        if (this._enhancedQueryEngine) {
+            const engineState = this._enhancedQueryEngine.getState();
+            const engineMode = this._enhancedQueryEngine.getMode();
+            
+            return {
+                mode: engineMode,
+                showWelcome: false,
+                shouldShowAnnouncement: false,
+                showSettings: false,
+                showHistory: false,
+                showAccount: false,
+                showWorktrees: false,
+                showMcp: false,
+                mcpTab: 'servers',
+                settingsTargetSection: 'general',
+                didHydrateState: true,
+                showAnnouncement: false,
+                dismissedBanners: [],
+                hasShownKanbanModal: true,
+                showKanbanModal: false,
+                activeOrganization: null,
+                clineUser: null,
+                organizations: [],
+                version: '1.0.0',
+                distinctId: 'codeline-' + Date.now(),
+                // 增强查询引擎特定状态
+                enhancedEngine: {
+                    hasEngine: true,
+                    turnCount: engineState.turnCount,
+                    messageCount: engineState.messages.length,
+                    toolCallCount: engineState.toolCalls.length,
+                    usage: engineState.usage,
+                    mode: engineMode
+                }
+            };
+        }
+        
+        // 否则返回默认模拟状态
+        return {
+            mode: 'chat',
+            showWelcome: false,
+            shouldShowAnnouncement: false,
+            showSettings: false,
+            showHistory: false,
+            showAccount: false,
+            showWorktrees: false,
+            showMcp: false,
+            mcpTab: 'servers',
+            settingsTargetSection: 'general',
+            didHydrateState: true,
+            showAnnouncement: false,
+            dismissedBanners: [],
+            hasShownKanbanModal: true,
+            showKanbanModal: false,
+            activeOrganization: null,
+            clineUser: null,
+            organizations: [],
+            version: '1.0.0',
+            distinctId: 'codeline-' + Date.now()
+        };
+    }
+    
+    /**
+     * 切换计划/行动模式
+     */
+    private async toggleMode(): Promise<boolean> {
+        // 优先切换增强查询引擎的模式
+        if (this._enhancedQueryEngine) {
+            const currentMode = this._enhancedQueryEngine.getMode();
+            const newMode = currentMode === 'act' ? 'plan' : 'act';
+            this._enhancedQueryEngine.setMode(newMode);
+            console.log(`切换增强查询引擎模式: ${currentMode} -> ${newMode}`);
+            return newMode === 'plan';
+        }
+        
+        // 否则切换内部模式
+        const currentMode = this._currentMode || 'act';
+        this._currentMode = currentMode === 'act' ? 'plan' : 'act';
+        console.log(`切换内部模式: ${currentMode} -> ${this._currentMode}`);
+        return this._currentMode === 'plan';
+    }
+    
+    /**
+     * 切换计划/行动模式（增强引擎版本）
+     */
+    private async toggleModeWithEnhancedEngine(): Promise<boolean> {
+        return await this.toggleMode();
+    }
+    
+    /**
+     * 获取增强引擎状态
+     */
+    private async getEnhancedEngineStatus(): Promise<any> {
+        try {
+            if (this._enhancedQueryEngine) {
+                const state = this._enhancedQueryEngine.getState();
+                const mode = this._enhancedQueryEngine.getMode();
+                const usage = this._enhancedQueryEngine.getUsage();
+                const messages = this._enhancedQueryEngine.getMessages();
+                
+                return {
+                    available: true,
+                    ready: true,
+                    mode,
+                    stats: {
+                        turnCount: state.turnCount,
+                        messageCount: messages.length,
+                        toolCallCount: state.toolCalls.length,
+                        usage: usage,
+                    },
+                    state: {
+                        mode,
+                        thinking: state.thinking,
+                        messages: messages.slice(-5), // 最近5条消息
+                        toolCalls: state.toolCalls.slice(-5), // 最近5个工具调用
+                    },
+                    timestamp: new Date().toISOString(),
+                };
+            }
+            
+            // 如果增强查询引擎不可用，尝试从扩展获取
+            if (this._extension) {
+                try {
+                    const adapter = await this._extension.getEnhancedEngineAdapter();
+                    const adapterState = adapter.getState();
+                    const engine = adapter.getEngine();
+                    
+                    if (engine) {
+                        const state = engine.getState();
+                        const mode = engine.getMode();
+                        const usage = engine.getUsage();
+                        const messages = engine.getMessages();
+                        
+                        return {
+                            available: true,
+                            ready: adapterState.engineReady,
+                            mode,
+                            stats: {
+                                turnCount: state.turnCount,
+                                messageCount: messages.length,
+                                toolCallCount: state.toolCalls.length,
+                                usage: usage,
+                            },
+                            adapterState: adapterState,
+                            timestamp: new Date().toISOString(),
+                        };
+                    } else {
+                        return {
+                            available: false,
+                            ready: false,
+                            error: 'Engine not created yet',
+                            adapterState: adapterState,
+                        };
+                    }
+                } catch (error: any) {
+                    return {
+                        available: false,
+                        ready: false,
+                        error: `Failed to get adapter: ${error.message}`,
+                    };
+                }
+            }
+            
+            return {
+                available: false,
+                ready: false,
+                error: 'Enhanced engine not available',
+            };
+        } catch (error: any) {
+            console.error('获取增强引擎状态失败:', error);
+            return {
+                available: false,
+                ready: false,
+                error: error.message,
+            };
+        }
+    }
+    
+    /**
+     * 获取增强引擎详细状态
+     */
+    private async getEnhancedEngineDetailedState(): Promise<any> {
+        try {
+            const status = await this.getEnhancedEngineStatus();
+            
+            // 如果引擎可用，获取更多详细信息
+            if (status.available && this._enhancedQueryEngine) {
+                const state = this._enhancedQueryEngine.getState();
+                const messages = this._enhancedQueryEngine.getMessages();
+                const usage = this._enhancedQueryEngine.getUsage();
+                
+                return {
+                    ...status,
+                    detailed: {
+                        conversationState: {
+                            mode: state.mode,
+                            thinking: state.thinking,
+                            turnCount: state.turnCount,
+                            toolCalls: state.toolCalls,
+                        },
+                        messages: messages,
+                        usage: usage,
+                        toolRegistry: this._toolRegistry ? {
+                            toolCount: this._toolRegistry.getAllTools().length,
+                            categories: this._toolRegistry.getAllTools().reduce((cats, tool) => {
+                                if (!cats.includes(tool.category)) cats.push(tool.category);
+                                return cats;
+                            }, [] as string[]),
+                        } : null,
+                        exportAvailable: true,
+                        importAvailable: true,
+                    },
+                    timestamp: new Date().toISOString(),
+                };
+            }
+            
+            return status;
+        } catch (error: any) {
+            console.error('获取增强引擎详细状态失败:', error);
+            return {
+                available: false,
+                error: error.message,
+                timestamp: new Date().toISOString(),
+            };
+        }
+    }
+    
+    /**
+     * 从构建目录加载HTML内容并转换资源路径
+     */
+    private async _loadHtmlFromFile(indexPath: vscode.Uri, webview: vscode.Webview): Promise<string> {
+        try {
+            console.log('加载构建的HTML:', indexPath.fsPath);
+            
+            // 读取HTML文件
+            let html = fs.readFileSync(indexPath.fsPath, 'utf-8');
+            
+            // 转换资源路径：将相对路径转换为webview可访问的URI
+            const buildDir = path.dirname(indexPath.fsPath);
+            const assetsDir = path.join(buildDir, 'assets');
+            
+            // 转换CSS和JS引用
+            html = html.replace(
+                /(href|src)=["']([^"']+\.(css|js|woff2?|ttf|mp4))["']/g,
+                (match, attr, resourcePath) => {
+                    const fullPath = path.join(buildDir, resourcePath);
+                    if (fs.existsSync(fullPath)) {
+                        const webviewUri = webview.asWebviewUri(vscode.Uri.file(fullPath));
+                        return `${attr}="${webviewUri}"`;
+                    }
+                    return match;
+                }
+            );
+            
+            console.log('HTML转换完成');
+            return html;
+        } catch (error) {
+            console.error('加载构建HTML失败:', error);
+            // 回退到原始内容
+            return this._getWebviewContent();
+        }
+    }
+    
     private _getWebviewContent(): string {
         return getWebviewContent();
     }
@@ -719,5 +1606,354 @@ export class CodeLineSidebarProvider implements vscode.WebviewViewProvider {
                 command: 'focusInput'
             });
         }
+    }
+
+    // ------------------------------------------------------------
+    // 适配器命令处理函数
+    // ------------------------------------------------------------
+    
+    /**
+     * 发送响应消息到WebView
+     */
+    private sendAdapterResponse(messageId: string, data: any, error?: string, webviewView?: vscode.WebviewView) {
+        const targetView = webviewView || this._view;
+        if (!targetView) return;
+        
+        targetView.webview.postMessage({
+            messageId,
+            data,
+            error
+        });
+    }
+    
+    // 文件操作处理函数
+    private async handleFileOpenRelativePath(path: string, messageId: string, webviewView: vscode.WebviewView) {
+        try {
+            if (!path) {
+                this.sendAdapterResponse(messageId, null, 'Path is required', webviewView);
+                return;
+            }
+            
+            // 打开文件
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (!workspaceFolders || workspaceFolders.length === 0) {
+                this.sendAdapterResponse(messageId, null, 'No workspace folder open', webviewView);
+                return;
+            }
+            
+            const workspacePath = workspaceFolders[0].uri.fsPath;
+            const filePath = require('path').join(workspacePath, path);
+            
+            const uri = vscode.Uri.file(filePath);
+            const document = await vscode.workspace.openTextDocument(uri);
+            await vscode.window.showTextDocument(document);
+            
+            this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+        } catch (error: any) {
+            this.sendAdapterResponse(messageId, null, error.message, webviewView);
+        }
+    }
+    
+    private async handleFileSelectFiles(supportsImages: boolean, messageId: string, webviewView: vscode.WebviewView) {
+        try {
+            const options: vscode.OpenDialogOptions = {
+                canSelectMany: true,
+                openLabel: 'Select',
+                filters: supportsImages ? {
+                    'Images': ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'],
+                    'All files': ['*']
+                } : undefined
+            };
+            
+            const fileUris = await vscode.window.showOpenDialog(options);
+            if (!fileUris || fileUris.length === 0) {
+                this.sendAdapterResponse(messageId, { images: [], files: [] }, undefined, webviewView);
+                return;
+            }
+            
+            const images: string[] = [];
+            const files: string[] = [];
+            
+            fileUris.forEach(uri => {
+                const extension = require('path').extname(uri.fsPath).toLowerCase();
+                const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp'];
+                
+                if (supportsImages && imageExtensions.includes(extension)) {
+                    images.push(uri.fsPath);
+                } else {
+                    files.push(uri.fsPath);
+                }
+            });
+            
+            this.sendAdapterResponse(messageId, { images, files }, undefined, webviewView);
+        } catch (error: any) {
+            this.sendAdapterResponse(messageId, null, error.message, webviewView);
+        }
+    }
+    
+    private async handleFileCopyToClipboard(text: string, messageId: string, webviewView: vscode.WebviewView) {
+        try {
+            if (!text) {
+                this.sendAdapterResponse(messageId, null, 'Text is required', webviewView);
+                return;
+            }
+            
+            await vscode.env.clipboard.writeText(text);
+            this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+        } catch (error: any) {
+            this.sendAdapterResponse(messageId, null, error.message, webviewView);
+        }
+    }
+    
+    private async handleFileRead(path: string, messageId: string, webviewView: vscode.WebviewView) {
+        try {
+            if (!path) {
+                this.sendAdapterResponse(messageId, null, 'Path is required', webviewView);
+                return;
+            }
+            
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (!workspaceFolders || workspaceFolders.length === 0) {
+                this.sendAdapterResponse(messageId, null, 'No workspace folder open', webviewView);
+                return;
+            }
+            
+            const workspacePath = workspaceFolders[0].uri.fsPath;
+            const filePath = require('path').join(workspacePath, path);
+            
+            const uri = vscode.Uri.file(filePath);
+            const document = await vscode.workspace.openTextDocument(uri);
+            const content = document.getText();
+            
+            this.sendAdapterResponse(messageId, { content }, undefined, webviewView);
+        } catch (error: any) {
+            this.sendAdapterResponse(messageId, null, error.message, webviewView);
+        }
+    }
+    
+    private async handleFileWrite(path: string, content: string, messageId: string, webviewView: vscode.WebviewView) {
+        try {
+            if (!path) {
+                this.sendAdapterResponse(messageId, null, 'Path is required', webviewView);
+                return;
+            }
+            
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (!workspaceFolders || workspaceFolders.length === 0) {
+                this.sendAdapterResponse(messageId, null, 'No workspace folder open', webviewView);
+                return;
+            }
+            
+            const workspacePath = workspaceFolders[0].uri.fsPath;
+            const filePath = require('path').join(workspacePath, path);
+            
+            const uri = vscode.Uri.file(filePath);
+            await vscode.workspace.fs.writeFile(uri, Buffer.from(content || '', 'utf8'));
+            
+            this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+        } catch (error: any) {
+            this.sendAdapterResponse(messageId, null, error.message, webviewView);
+        }
+    }
+    
+    private async handleFileList(path: string | undefined, messageId: string, webviewView: vscode.WebviewView) {
+        try {
+            const workspaceFolders = vscode.workspace.workspaceFolders;
+            if (!workspaceFolders || workspaceFolders.length === 0) {
+                this.sendAdapterResponse(messageId, null, 'No workspace folder open', webviewView);
+                return;
+            }
+            
+            const workspacePath = workspaceFolders[0].uri.fsPath;
+            const targetPath = path ? require('path').join(workspacePath, path) : workspacePath;
+            
+            const uri = vscode.Uri.file(targetPath);
+            const entries = await vscode.workspace.fs.readDirectory(uri);
+            
+            const files = entries
+                .filter(([name, type]) => type === vscode.FileType.File)
+                .map(([name]) => name);
+            
+            this.sendAdapterResponse(messageId, { files }, undefined, webviewView);
+        } catch (error: any) {
+            this.sendAdapterResponse(messageId, null, error.message, webviewView);
+        }
+    }
+    
+    // UI操作处理函数
+    private async handleUiShowAnnouncement(messageId: string, webviewView: vscode.WebviewView) {
+        try {
+            vscode.window.showInformationMessage('Show announcement (placeholder)');
+            this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+        } catch (error: any) {
+            this.sendAdapterResponse(messageId, null, error.message, webviewView);
+        }
+    }
+    
+    private async handleUiNavigate(view: string, data: any, messageId: string, webviewView: vscode.WebviewView) {
+        try {
+            // 发送切换视图消息到WebView
+            webviewView.webview.postMessage({
+                command: 'switchView',
+                view: view
+            });
+            
+            this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+        } catch (error: any) {
+            this.sendAdapterResponse(messageId, null, error.message, webviewView);
+        }
+    }
+    
+    private async handleStateDismissBanner(bannerId: string, messageId: string, webviewView: vscode.WebviewView) {
+        try {
+            // 处理横幅关闭
+            console.log('Dismiss banner:', bannerId);
+            this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+        } catch (error: any) {
+            this.sendAdapterResponse(messageId, null, error.message, webviewView);
+        }
+    }
+    
+    // 工具操作处理函数
+    private async handleToolExecute(toolName: string, params: any, messageId: string, webviewView: vscode.WebviewView) {
+        try {
+            console.log('Execute tool:', toolName, params);
+            // 这里应该调用Claude Code的QueryEngine
+            // 暂时返回模拟结果
+            const result = {
+                success: true,
+                output: `Tool ${toolName} executed with params: ${JSON.stringify(params)}`,
+                executionId: Date.now().toString(),
+            };
+            
+            this.sendAdapterResponse(messageId, result, undefined, webviewView);
+        } catch (error: any) {
+            this.sendAdapterResponse(messageId, null, error.message, webviewView);
+        }
+    }
+    
+    private async handleToolCancel(executionId: string, messageId: string, webviewView: vscode.WebviewView) {
+        try {
+            console.log('Cancel tool:', executionId);
+            this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+        } catch (error: any) {
+            this.sendAdapterResponse(messageId, null, error.message, webviewView);
+        }
+    }
+    
+    private async handleToolList(messageId: string, webviewView: vscode.WebviewView) {
+        try {
+            // 返回工具列表
+            const tools = [
+                { name: 'read_file', description: '读取文件内容', category: 'file' },
+                { name: 'write_file', description: '写入文件', category: 'file' },
+                { name: 'execute_command', description: '执行终端命令', category: 'terminal' },
+            ];
+            
+            this.sendAdapterResponse(messageId, { tools }, undefined, webviewView);
+        } catch (error: any) {
+            this.sendAdapterResponse(messageId, null, error.message, webviewView);
+        }
+    }
+
+    // 账户相关方法存根
+    private async handleAccountGetUserOrganizations(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { organizations: [] }, undefined, webviewView);
+    }
+    
+    private async handleAccountLoginClicked(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+    }
+    
+    private async handleAccountLogoutClicked(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+    }
+    
+    private async handleAccountAuthStateChanged(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { status: 'not_implemented' }, undefined, webviewView);
+    }
+    
+    private async handleAccountGetUserCredits(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { credits: 0 }, undefined, webviewView);
+    }
+    
+    private async handleAccountGetOrganizationCredits(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { credits: 0 }, undefined, webviewView);
+    }
+    
+    private async handleAccountSetUserOrganization(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+    }
+    
+    private async handleAccountGetRedirectUrl(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { url: '' }, undefined, webviewView);
+    }
+    
+    private async handleAccountOpenAiCodexSignIn(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+    }
+    
+    private async handleAccountOpenAiCodexSignOut(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+    }
+    
+    // MCP相关方法存根
+    private async handleMcpGetMarketplaceCatalog(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { catalog: [] }, undefined, webviewView);
+    }
+    
+    private async handleMcpGetServer(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { server: null }, undefined, webviewView);
+    }
+    
+    // 模型相关方法存根
+    private async handleModelsGetModels(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { models: [] }, undefined, webviewView);
+    }
+    
+    private async handleModelsGetDefaultModel(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { model: null }, undefined, webviewView);
+    }
+    
+    // 斜杠命令方法存根
+    private async handleSlashExecuteCommand(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+    }
+    
+    // 检查点方法存根
+    private async handleCheckpointsList(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { checkpoints: [] }, undefined, webviewView);
+    }
+    
+    // OCA方法存根
+    private async handleOcaSignIn(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+    }
+    
+    private async handleOcaSignOut(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+    }
+    
+    // Web方法存根
+    private async handleWebOpenUrl(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+    }
+    
+    private async handleWebCapturePage(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
+    }
+    
+    // 浏览器方法存根
+    private async handleBrowserGetConnectionInfo(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { connectionInfo: null }, undefined, webviewView);
+    }
+    
+    // 工作树方法存根
+    private async handleWorktreeList(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { worktrees: [] }, undefined, webviewView);
+    }
+    
+    private async handleWorktreeTrackViewOpened(data: any, messageId: string, webviewView: vscode.WebviewView): Promise<void> {
+        this.sendAdapterResponse(messageId, { success: true }, undefined, webviewView);
     }
 }

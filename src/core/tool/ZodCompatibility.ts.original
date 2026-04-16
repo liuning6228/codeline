@@ -1,0 +1,335 @@
+/**
+ * Zod兼容性层
+ * 
+ * 目标：将真正的Zod库包装为兼容旧接口的格式，支持渐进式迁移
+ * 设计原则：
+ * 1. 保持向后兼容性 - 现有代码继续工作
+ * 2. 支持真正的Zod - 新代码可以使用完整的Zod功能
+ * 3. 渐进式迁移 - 可以逐步从旧接口迁移到新接口
+ * 
+ * 使用指南：
+ * 1. 新工具：直接使用真正的Zod（import { z } from './ZodCompatibility'）
+ * 2. 迁移中的工具：使用createCompatibleSchema包装真正的Zod schema
+ * 3. 旧工具：继续使用LegacyZodSchema接口
+ */
+
+import { z as realZod, ZodSchema as RealZodSchema, ZodError, ZodTypeAny } from 'zod';
+
+// ==================== 导出真正的Zod ====================
+
+/**
+ * 真正的Zod库 - 新代码应直接使用
+ */
+export { realZod as z, ZodError };
+
+// ==================== 兼容性接口定义 ====================
+
+/**
+ * 旧接口定义（保持兼容）
+ * 与原来的ZodSchema接口一致
+ */
+export interface LegacyZodSchema<T = any> {
+  parse: (data: any) => T;
+  safeParse: (data: any) => SafeParseResult<T>;
+}
+
+/**
+ * 安全解析结果类型
+ */
+export interface SafeParseResult<T> {
+  success: boolean;
+  data?: T;
+  error?: any;
+}
+
+// ==================== 兼容性包装器 ====================
+
+/**
+ * 兼容性包装器
+ * 将真正的ZodSchema包装为旧接口，支持渐进式迁移
+ */
+export class CompatibleZodSchema<T = any> implements LegacyZodSchema<T> {
+  private realSchema: RealZodSchema<T>;
+  
+  constructor(realSchema: RealZodSchema<T>) {
+    this.realSchema = realSchema;
+  }
+  
+  /**
+   * 解析数据（旧接口）
+   */
+  parse(data: any): T {
+    return this.realSchema.parse(data);
+  }
+  
+  /**
+   * 安全解析数据（旧接口）
+   */
+  safeParse(data: any): SafeParseResult<T> {
+    const result = this.realSchema.safeParse(data);
+    if (result.success) {
+      return { success: true, data: result.data };
+    } else {
+      // 转换ZodError为旧格式
+      const error = {
+        name: 'ZodError',
+        message: result.error.message,
+        errors: result.error.errors,
+        toString: () => `ZodError: ${result.error.message}`,
+        // 保持与旧接口的兼容性
+        ...result.error
+      };
+      return { success: false, error };
+    }
+  }
+  
+  /**
+   * 获取底层真正的Zod schema（用于新代码或工具函数）
+   */
+  getRealSchema(): RealZodSchema<T> {
+    return this.realSchema;
+  }
+  
+  /**
+   * 检查是否为真正的Zod schema（类型守卫）
+   */
+  isRealZodSchema(): this is { getRealSchema(): RealZodSchema<T> } {
+    return true;
+  }
+}
+
+// ==================== 工具函数 ====================
+
+/**
+ * 创建兼容的schema
+ * @param schema 真正的Zod schema
+ * @returns 兼容旧接口的schema
+ */
+export function createCompatibleSchema<T>(schema: RealZodSchema<T>): LegacyZodSchema<T> {
+  return new CompatibleZodSchema(schema);
+}
+
+/**
+ * 检查是否为兼容schema
+ * @param schema 要检查的schema
+ * @returns 是否为兼容schema
+ */
+export function isCompatibleSchema<T>(schema: any): schema is CompatibleZodSchema<T> {
+  return schema instanceof CompatibleZodSchema;
+}
+
+/**
+ * 检查是否为真正的Zod schema（不是兼容包装器）
+ * @param schema 要检查的schema
+ * @returns 是否为真正的Zod schema
+ */
+export function isRealZodSchema(schema: any): schema is RealZodSchema {
+  // 检查是否具有Zod schema的典型特征
+  return schema && 
+         typeof schema === 'object' && 
+         typeof schema.parse === 'function' &&
+         typeof schema.safeParse === 'function' &&
+         !isCompatibleSchema(schema);
+}
+
+/**
+ * 从兼容schema获取真正的Zod schema
+ * @param schema 兼容schema
+ * @returns 真正的Zod schema，如果不是兼容schema则返回null
+ */
+export function getRealSchema<T>(schema: LegacyZodSchema<T>): RealZodSchema<T> | null {
+  if (isCompatibleSchema(schema)) {
+    return schema.getRealSchema();
+  }
+  return null;
+}
+
+/**
+ * 统一解析函数，处理各种类型的schema
+ * @param schema LegacyZodSchema或真正的Zod schema
+ * @param data 要解析的数据
+ * @returns 解析后的数据
+ */
+export function unifiedParse<T>(schema: LegacyZodSchema<T> | RealZodSchema<T>, data: any): T {
+  if (isRealZodSchema(schema)) {
+    // 真正的Zod schema
+    return schema.parse(data);
+  } else {
+    // 兼容schema
+    return schema.parse(data);
+  }
+}
+
+/**
+ * 统一安全解析函数
+ */
+export function unifiedSafeParse<T>(schema: LegacyZodSchema<T> | RealZodSchema<T>, data: any): SafeParseResult<T> {
+  if (isRealZodSchema(schema)) {
+    // 真正的Zod schema
+    const result = schema.safeParse(data);
+    if (result.success) {
+      return { success: true, data: result.data };
+    } else {
+      return { 
+        success: false, 
+        error: result.error 
+      };
+    }
+  } else {
+    // 兼容schema
+    return schema.safeParse(data);
+  }
+}
+
+// ==================== 迁移辅助工具 ====================
+
+/**
+ * 迁移辅助工具集
+ */
+export const compatibility = {
+  /**
+   * 创建基础类型的兼容schema
+   */
+  string: (options?: { min?: number; max?: number; regex?: RegExp }) => {
+    let schema = realZod.string();
+    if (options?.min !== undefined) schema = schema.min(options.min);
+    if (options?.max !== undefined) schema = schema.max(options.max);
+    if (options?.regex !== undefined) schema = schema.regex(options.regex);
+    return createCompatibleSchema(schema);
+  },
+  
+  number: (options?: { min?: number; max?: number; int?: boolean }) => {
+    let schema = realZod.number();
+    if (options?.min !== undefined) schema = schema.min(options.min);
+    if (options?.max !== undefined) schema = schema.max(options.max);
+    if (options?.int) schema = schema.int();
+    return createCompatibleSchema(schema);
+  },
+  
+  boolean: () => createCompatibleSchema(realZod.boolean()),
+  
+  any: () => createCompatibleSchema(realZod.any()),
+  
+  object: <T extends Record<string, ZodTypeAny>>(shape: T) => 
+    createCompatibleSchema(realZod.object(shape)),
+  
+  array: <T extends ZodTypeAny>(element: T) =>
+    createCompatibleSchema(realZod.array(element)),
+  
+  union: <T extends [ZodTypeAny, ...ZodTypeAny[]]>(options: T) =>
+    createCompatibleSchema(realZod.union(options)),
+  
+  literal: <T extends string | number | boolean>(value: T) =>
+    createCompatibleSchema(realZod.literal(value)),
+  
+  /**
+   * 模拟旧接口的object方法（保持兼容）
+   */
+  objectSimple: (schema: any) => createCompatibleSchema(realZod.object(schema)),
+  
+  /**
+   * 将旧的模拟schema转换为真正的Zod schema
+   * @param legacySchema 旧的模拟schema
+   * @returns 真正的Zod schema
+   */
+  migrateLegacySchema: (legacySchema: any): RealZodSchema<any> => {
+    // 这里是一个简单的实现，实际可能需要更复杂的逻辑
+    console.warn('migrateLegacySchema: 这是一个简化实现，可能需要手动迁移');
+    
+    // 尝试根据旧schema的行为推断类型
+    if (legacySchema && typeof legacySchema.safeParse === 'function') {
+      // 测试一些示例数据来推断类型
+      const testCases = [
+        'test string',
+        123,
+        true,
+        { test: 'object' },
+        ['array']
+      ];
+      
+      for (const testCase of testCases) {
+        const result = legacySchema.safeParse(testCase);
+        if (result.success) {
+          // 根据成功的测试用例推断类型
+          if (typeof testCase === 'string') return realZod.string();
+          if (typeof testCase === 'number') return realZod.number();
+          if (typeof testCase === 'boolean') return realZod.boolean();
+          if (Array.isArray(testCase)) return realZod.array(realZod.any());
+          if (typeof testCase === 'object') return realZod.object({});
+        }
+      }
+    }
+    
+    // 默认返回any
+    return realZod.any();
+  },
+  
+  /**
+   * 检查schema是否为旧模拟schema
+   */
+  isLegacyMockSchema: (schema: any): boolean => {
+    // 旧模拟schema的特征
+    return schema && 
+           typeof schema === 'object' &&
+           !isCompatibleSchema(schema) &&
+           !isRealZodSchema(schema) &&
+           (schema.parse || schema.safeParse);
+  },
+  
+  /**
+   * 创建迁移报告
+   */
+  createMigrationReport: (schema: any): MigrationReport => {
+    const report: MigrationReport = {
+      isLegacy: compatibility.isLegacyMockSchema(schema),
+      isCompatible: isCompatibleSchema(schema),
+      isRealZod: isRealZodSchema(schema),
+      recommendedAction: 'keep',
+      migrationComplexity: 'low'
+    };
+    
+    if (report.isLegacy) {
+      report.recommendedAction = 'migrate';
+      report.migrationComplexity = 'medium';
+      report.message = '建议迁移到真正的Zod schema以获得更好的类型安全性和错误信息';
+    } else if (report.isCompatible) {
+      report.recommendedAction = 'optional';
+      report.message = '已经是兼容schema，可以继续使用或直接使用真正的Zod';
+    } else if (report.isRealZod) {
+      report.recommendedAction = 'keep';
+      report.message = '已经是真正的Zod schema，无需迁移';
+    }
+    
+    return report;
+  }
+};
+
+/**
+ * 迁移报告接口
+ */
+export interface MigrationReport {
+  isLegacy: boolean;
+  isCompatible: boolean;
+  isRealZod: boolean;
+  recommendedAction: 'keep' | 'migrate' | 'optional';
+  migrationComplexity: 'low' | 'medium' | 'high';
+  message?: string;
+}
+
+// ==================== 类型导出 ====================
+
+export type { RealZodSchema, ZodTypeAny };
+export type { LegacyZodSchema as ZodSchema }; // 导出别名，保持兼容
+
+// 默认导出兼容性工具
+export default {
+  z,
+  ZodError,
+  createCompatibleSchema,
+  isCompatibleSchema,
+  isRealZodSchema,
+  getRealSchema,
+  unifiedParse,
+  unifiedSafeParse,
+  compatibility
+};

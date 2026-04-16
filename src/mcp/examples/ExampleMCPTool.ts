@@ -1,0 +1,170 @@
+/**
+ * 示例MCP工具
+ * 用于测试MCP集成
+ */
+
+/**
+ * 示例MCP工具实现
+ */
+export class ExampleMCPTool {
+  readonly id = 'example-mcp-tool';
+  readonly name = '示例MCP工具';
+  readonly description = '一个用于测试MCP集成的示例工具';
+  readonly version = '1.0.0';
+  readonly author = 'CodeLine Team';
+  
+  /** 工具能力 */
+  readonly capabilities = [
+    'read_only',
+    'file_system',
+    'utility'
+  ];
+  
+  /** 工具配置 */
+  readonly configuration = {
+    timeout: {
+      type: 'number',
+      description: '超时时间（毫秒）',
+      default: 5000
+    },
+    format: {
+      type: 'string',
+      description: '输出格式',
+      default: 'json'
+    }
+  };
+  
+  /**
+   * 执行工具
+   */
+  async execute(params: Record<string, any>): Promise<any> {
+    console.log('示例MCP工具执行，参数:', params);
+    
+    // 模拟处理时间
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // 返回示例数据
+    return {
+      success: true,
+      message: '示例MCP工具执行成功',
+      timestamp: new Date().toISOString(),
+      inputParams: params,
+      processedData: {
+        sample: '这是示例输出',
+        count: Object.keys(params).length,
+        items: Object.keys(params).map(key => ({
+          key,
+          value: params[key],
+          type: typeof params[key]
+        }))
+      }
+    };
+  }
+  
+  /**
+   * 验证参数
+   */
+  validate(params: Record<string, any>): boolean {
+    // 简单验证：参数必须是对象
+    return params !== null && typeof params === 'object';
+  }
+}
+
+/**
+ * 另一个示例MCP工具：文件信息工具
+ */
+export class FileInfoMCPTool {
+  readonly id = 'file-info-mcp-tool';
+  readonly name = '文件信息MCP工具';
+  readonly description = '获取文件信息的示例MCP工具';
+  readonly version = '1.0.0';
+  readonly author = 'CodeLine Team';
+  
+  /** 工具能力 */
+  readonly capabilities = [
+    'read_only',
+    'file_system',
+    'file_operations'
+  ];
+  
+  /**
+   * 执行工具
+   */
+  async execute(params: Record<string, any>): Promise<any> {
+    console.log('文件信息MCP工具执行，参数:', params);
+    
+    const { path, operation = 'info' } = params;
+    
+    if (!path) {
+      throw new Error('缺少必需的参数: path');
+    }
+    
+    // 模拟文件操作
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
+    switch (operation) {
+      case 'info':
+        return {
+          success: true,
+          path,
+          type: 'file',
+          size: 1024, // 模拟文件大小
+          created: new Date().toISOString(),
+          modified: new Date().toISOString(),
+          permissions: 'rw-r--r--'
+        };
+        
+      case 'exists':
+        return {
+          success: true,
+          path,
+          exists: true,
+          isFile: true,
+          isDirectory: false
+        };
+        
+      default:
+        throw new Error(`不支持的操作: ${operation}`);
+    }
+  }
+  
+  /**
+   * 验证参数
+   */
+  validate(params: Record<string, any>): boolean {
+    return params !== null && 
+           typeof params === 'object' && 
+           typeof params.path === 'string' &&
+           params.path.length > 0;
+  }
+}
+
+/**
+ * 创建示例MCP工具列表
+ */
+export function createExampleMCPTools(): any[] {
+  return [
+    new ExampleMCPTool(),
+    new FileInfoMCPTool()
+  ];
+}
+
+/**
+ * MCP工具工厂
+ */
+export class MCPToolFactory {
+  /**
+   * 创建所有示例MCP工具
+   */
+  static createAll(): any[] {
+    return createExampleMCPTools();
+  }
+  
+  /**
+   * 根据ID创建MCP工具
+   */
+  static createById(toolId: string): any | null {
+    const tools = createExampleMCPTools();
+    return tools.find(tool => tool.id === toolId) || null;
+  }
+}

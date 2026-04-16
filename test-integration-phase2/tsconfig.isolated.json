@@ -1,0 +1,31 @@
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "module": "commonjs",
+    "lib": ["ES2020", "DOM", "ES2015"],
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "declaration": false,
+    "noEmitOnError": false,
+    "allowJs": true,
+    "checkJs": false,
+    "types": ["node", "mocha"]
+  },
+  "include": [
+    "src/tests/**/*.ts",
+    "src/mocks/**/*.ts",
+    "src/adapters/**/*.ts",
+    "src/types/**/*.ts",
+    "src/loaders/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "out"
+  ]
+}
