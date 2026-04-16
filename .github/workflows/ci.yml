@@ -68,11 +68,49 @@ jobs:
     - name: Compile test files
       run: npm run compile:tests
       
+    - name: Debug - Check compiled test structure
+      shell: bash
+      run: |
+        echo "=== 检查编译后的测试文件结构 ==="
+        echo "out目录内容:"
+        find out -type f -name "*.js" | head -30
+        echo ""
+        echo "out/test目录内容:"
+        find out/test -type f -name "*.js" 2>/dev/null | head -30 || echo "out/test目录不存在"
+        echo ""
+        echo "mockVscode文件状态:"
+        if [ -f "out/test/helpers/mockVscode.js" ]; then
+          echo "✅ mockVscode.js存在，大小: $(wc -l < out/test/helpers/mockVscode.js) 行"
+          head -5 out/test/helpers/mockVscode.js
+        else
+          echo "❌ mockVscode.js不存在"
+          echo "查找mockVscode文件:"
+          find . -name "mockVscode.js" 2>/dev/null
+        fi
+      
     - name: Run unit tests
-      run: npm run test:unit
+      run: |
+        echo "=== 运行单元测试 ==="
+        npm run test:unit 2>&1 | tee unit-test-output.log
+        UNIT_EXIT_CODE=${PIPESTATUS[0]}
+        echo "单元测试退出码: $UNIT_EXIT_CODE"
+        if [ $UNIT_EXIT_CODE -ne 0 ]; then
+          echo "⚠️  单元测试失败，显示错误:"
+          cat unit-test-output.log | tail -50
+        fi
+        exit $UNIT_EXIT_CODE
       
     - name: Run integration tests  
-      run: npm run test:integration
+      run: |
+        echo "=== 运行集成测试 ==="
+        npm run test:integration 2>&1 | tee integration-test-output.log
+        INTEGRATION_EXIT_CODE=${PIPESTATUS[0]}
+        echo "集成测试退出码: $INTEGRATION_EXIT_CODE"
+        if [ $INTEGRATION_EXIT_CODE -ne 0 ]; then
+          echo "⚠️  集成测试失败，显示错误:"
+          cat integration-test-output.log | tail -50
+        fi
+        exit $INTEGRATION_EXIT_CODE
       
     - name: Check code formatting
       run: |
